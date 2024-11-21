@@ -1,0 +1,158 @@
+[
+    {
+      "name": "Kosovë",
+      "code": "KS",
+      "ISOCode2": "XK",
+      "ISOCode3": "XKX",
+      "ISDCode": "+383",
+      "minPhoneDigit": 8,
+      "maxPhoneDigit": 8,
+      "img": "",
+      "nationality": "Kosovar",
+      "timezones": [
+        {
+          "zoneName": "CET",
+          "gmtOffset": 1,
+          "gmtOffsetName": "GMT+01:00",
+          "abbreviation": "CET",
+          "tzName": "Central European Time"
+        },
+        {
+          "zoneName": "CEST",
+          "gmtOffset": 2,
+          "gmtOffsetName": "GMT+02:00",
+          "abbreviation": "CEST",
+          "tzName": "Central European Summer Time"
+        }
+      ],
+      "capital": "Pristina",
+      "lat": 42.6026,
+      "long": 20.9026,
+      "currency": "EUR",
+      "currencySymbol": "€",
+      "tz": "CET/CEST",
+      "isActive": true,
+      "isDefault": false,
+      "deletedAt": null,
+      "createdBy": null,
+      "updatedBy": [],
+      "deletedBy": null
+    },
+    {
+      "name": "Shqipëri",
+      "code": "AL",
+      "ISOCode2": "AL",
+      "ISOCode3": "ALB",
+      "ISDCode": "+355",
+      "minPhoneDigit": 8,
+      "maxPhoneDigit": 8,
+      "img": "",
+      "nationality": "Albanian",
+      "timezones": [
+        {
+          "zoneName": "CET",
+          "gmtOffset": 1,
+          "gmtOffsetName": "GMT+01:00",
+          "abbreviation": "CET",
+          "tzName": "Central European Time"
+        },
+        {
+          "zoneName": "CEST",
+          "gmtOffset": 2,
+          "gmtOffsetName": "GMT+02:00",
+          "abbreviation": "CEST",
+          "tzName": "Central European Summer Time"
+        }
+      ],
+      "capital": "Tirana",
+      "lat": 41.3275,
+      "long": 19.8189,
+      "currency": "ALL",
+      "currencySymbol": "Lek",
+      "tz": "CET/CEST",
+      "isActive": true,
+      "isDefault": false,
+      "deletedAt": null,
+      "createdBy": null,
+      "updatedBy": [],
+      "deletedBy": null
+    },
+    {
+      "name": "Maqedoni",
+      "code": "MK",
+      "ISOCode2": "MK",
+      "ISOCode3": "MKD",
+      "ISDCode": "+389",
+      "minPhoneDigit": 8,
+      "maxPhoneDigit": 8,
+      "img": "",
+      "nationality": "Macedonian",
+      "timezones": [
+        {
+          "zoneName": "CET",
+          "gmtOffset": 1,
+          "gmtOffsetName": "GMT+01:00",
+          "abbreviation": "CET",
+          "tzName": "Central European Time"
+        },
+        {
+          "zoneName": "CEST",
+          "gmtOffset": 2,
+          "gmtOffsetName": "GMT+02:00",
+          "abbreviation": "CEST",
+          "tzName": "Central European Summer Time"
+        }
+      ],
+      "capital": "Skopje",
+      "lat": 41.9981,
+      "long": 21.4254,
+      "currency": "MKD",
+      "currencySymbol": "ден",
+      "tz": "CET/CEST",
+      "isActive": true,
+      "isDefault": false,
+      "deletedAt": null,
+      "createdBy": null,
+      "updatedBy": [],
+      "deletedBy": null
+    },
+    {
+      "name": "Bosnia and Herzegovina",
+      "code": "BA",
+      "ISOCode2": "BA",
+      "ISOCode3": "BIH",
+      "ISDCode": "+387",
+      "minPhoneDigit": 8,
+      "maxPhoneDigit": 8,
+      "img": "",
+      "nationality": "Bosnian",
+      "timezones": [
+        {
+          "zoneName": "CET",
+          "gmtOffset": 1,
+          "gmtOffsetName": "GMT+01:00",
+          "abbreviation": "CET",
+          "tzName": "Central European Time"
+        },
+        {
+          "zoneName": "CEST",
+          "gmtOffset": 2,
+          "gmtOffsetName": "GMT+02:00",
+          "abbreviation": "CEST",
+          "tzName": "Central European Summer Time"
+        }
+      ],
+      "capital": "Sarajevo",
+      "lat": 43.8486,
+      "long": 18.3564,
+      "currency": "BAM",
+      "currencySymbol": "KM",
+      "tz": "CET/CEST",
+      "isActive": true,
+      "isDefault": false,
+      "deletedAt": null,
+      "createdBy": null,
+      "updatedBy": [],
+      "deletedBy": null
+    }
+  ]  

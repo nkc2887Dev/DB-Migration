@@ -1,11 +1,13 @@
-const mongoose = require("mongoose");
+import { MongoClient } from "mongodb";
 
 export const connectionOfMongo = async () => {
     try {
-      await mongoose.connect(process.env.MONGO_URL, {
-        connectTimeoutMS: 10000,
-      });
+
+      const mongoClient = new MongoClient(process.env.MONGO_URL as any);
+      await mongoClient.connect();
+      
       console.log("Connected to MongoDB successfully");
+      return mongoClient;
     } catch (error: any) {
       console.error("Error connecting to MongoDB:", error.message);
       throw error;
