@@ -9,7 +9,7 @@ export const connectionOfMySQL = async () => {
         database: process.env.MYSQL_DB,
         port: Number(process.env.MYSQL_PORT),
     });
-    console.log('Connected to MySQL database successfully');
+    console.info('Connected to MySQL database successfully');
     return connection;
   } catch (error:any) {
     console.error('Error connecting to MySQL database:', error.message);

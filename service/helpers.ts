@@ -102,11 +102,11 @@ export const slugify = (text: any) => {
         .replace(/-+$/, ""); // Trim - from end of text
 };
 
-const createCode = async (str: string) => {
+export const createCode = async (str: string) => {
     return str.replace(/[^\s\w]/gi, " ").toUpperCase().replace(/ /g, "_").toString()
 }
 
-export const findOrCreateMaster = async (masterNm:any, parentCode:any, db:any) => {
+export const findOrCreateMaster = async (masterNm: any, parentCode: any, db: any) => {
     try {
         const Master = await db.collection("master");
         if (masterNm) {
@@ -114,7 +114,7 @@ export const findOrCreateMaster = async (masterNm:any, parentCode:any, db:any) =
             const parentMaster = await Master.findOne({ code: parentCode })
             let master = parentMaster && await Master.findOneAndUpdate(
                 { code: masterCode },
-                { 
+                {
                     $set: {
                         importId: "DEV-45912",
                         name: masterNm,
@@ -128,9 +128,88 @@ export const findOrCreateMaster = async (masterNm:any, parentCode:any, db:any) =
             );
             return ({ _id: master._id, names: master.names })
         }
-        return false
+        return false;
     } catch (error) {
         console.error("Error-findOrCreateMaster", error)
         return false
     }
 }
+
+export const updateUserQualificationsWithDetails = async (educationRecords: any, db: any) => {
+    try {
+        const userQualifications = await Promise.all(educationRecords.map(async (education: any) => {
+            const educations = await db.collection("educations").find({ importId: 'DEV-45912', userId: education.userId }).toArray();
+
+            const qualifications = await educations.map((education: any) => ({
+                _id: education._id,
+                qualificationId: education.qualificationId,
+                qualificationNm: education.qualificationNm,
+                fieldOfStuNm: education.fieldOfStuNm,
+            }));
+            await db.collection("user").findOneAndUpdate({ _id: education.userId }, { $set: { qualifications } }, { new: true })
+        }));
+
+        console.info(`Successfully updated ${userQualifications.length} users with qualifications.`);
+    } catch (error) {
+        console.error("Error - updateUserQualificationsWithDetails", error);
+        throw error;
+    }
+};
+
+export const updateUserExperienceWithDetails = async (experiencesRecords: any, db: any) => {
+    try {
+        const userExperience = await Promise.all(experiencesRecords.map(async (experience: any) => {
+            const experiences = await db.collection("experiences").find({ importId: 'DEV-45912', userId: experience.userId }).toArray();
+
+            const experienceIds = await experiences.map((experience: any) => ({
+                id: experience._id,
+                expNm: {
+                    "en":experience.title,
+                    "id":experience.title,
+                },
+            }));
+            await db.collection("user").findOneAndUpdate({ _id: experience.userId }, { $set: { experienceIds } }, { new: true })
+        }));
+
+        console.info(`Successfully updated ${userExperience.length} users with experiences.`);
+    } catch (error) {
+        console.error("Error - updateUserExperienceWithDetails", error);
+        throw error;
+    }
+};
+
+export const updateUserResumeWithDetails = async (resumesRecords: any, db: any) => {
+    try {
+        const userResumes = await Promise.all(resumesRecords.map(async (resume: any) => {
+            const resumesFromFile = await db.collection("file").find({ importId: 'DEV-45912', userId: resume.userId }).toArray();
+            resumesFromFile.sort((a: any, b: any) => b.createdAt - a.createdAt);
+
+            const resumes = await resumesFromFile.map((resume: any) => ({
+                tempId: resume._id,
+                uri: resume.uri,
+                oriNm: resume.oriNm,
+                prevUsed: false,
+                createdAt: resume.createdAt,
+            }));
+            await db.collection("user").findOneAndUpdate({ _id: resume.userId }, { $set: { resumes, resumeHeaders: process.env.USER_TABS_HEADER, resumeFileId: resumesFromFile[0]._id } }, { new: true })
+        }));
+
+        console.info(`Successfully updated ${userResumes.length} users with resumes.`);
+    } catch (error) {
+        console.error("Error - updateUserResumeWithDetails", error);
+        throw error;
+    }
+};
+
+export const parseAddress = (addressString: string) => {
+    if (!addressString) return {};
+
+    const parts = addressString.split(',').map(part => part.trim());
+    return {
+        street: parts[0] || undefined,
+        address1: parts[1] || undefined,
+        zipCode: parts[2]?.match(/\d+/)?.[0] || undefined,
+        cityNm: parts[2]?.replace(/\d+/g, '').trim() || undefined,
+        countryNm: parts[3] || undefined,
+    };
+};
