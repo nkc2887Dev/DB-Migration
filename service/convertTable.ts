@@ -1,5 +1,5 @@
 import bcrypt from "bcrypt";
-import { assignDefaultLicence, createCode, findOrCreateMaster, migrateProfilePercentage, parseAddress, slugify, updateUserExperienceWithDetails, updateUserQualificationsWithDetails, updateUserResumeWithDetails } from "./helpers";
+import { addCompaniesToEmployer, assignDefaultLicence, createCode, findOrCreateMaster, makeItYopmail, migrateProfilePercentage, parseAddress, slugify, updateCompanyWithUserDetails, updateUserExperienceWithDetails, updateUserQualificationsWithDetails, updateUserResumeWithDetails, updateUserWithCompanyDetails } from "./helpers";
 import countriesJSON from './constant/country.json';
 const database = process.env.MONGO_DB;
 import _ from "lodash";
@@ -14,15 +14,16 @@ type MimeTypes = {
 export const convertUserTable = async (mysqlConn: any, mongoClient: any) => {
     try {
         const db = mongoClient.db(database);
-        const rolename = '';
-        const email = '';
+        // const rolename = 'punekerkues';
+        const rolename = 'punedhenes';
+        // const rolename = 'admin';
 
         const [usersFromMySQL] = await mysqlConn.query(`
             SELECT 
                 u.id AS user_id, 
                 u.*, 
                 p.id AS people_id,
-                p.*, 
+                p.*,
                 ru.role_id, 
                 r.id AS role_id_in_roles, 
                 r.name AS role_name
@@ -30,8 +31,8 @@ export const convertUserTable = async (mysqlConn: any, mongoClient: any) => {
             INNER JOIN roles r ON ru.role_id = r.id
             INNER JOIN users u ON ru.user_id = u.id
             LEFT JOIN people p ON u.email = p.email
-            WHERE r.name = "${rolename}" AND u.email = "${email}";
-        `);
+            WHERE r.name = ?;
+        `, [rolename]);
 
         // Gender
         const genderData = await db.collection("master").find({ parentCode: "GENDER" }).toArray();
@@ -46,7 +47,12 @@ export const convertUserTable = async (mysqlConn: any, mongoClient: any) => {
         }, {});
 
         // Role
-        const role = await db.collection("role").findOne({ code: "CANDIDATE" });
+        const roleCode = {
+            "punekerkues": "CANDIDATE",
+            "punedhenes": "EMPLOYER",
+            "admin": "ADMIN",
+        }
+        const role = await db.collection("role").findOne({ code: roleCode[rolename] });
         const roleId = role ? role._id : null;
         const miscSetting = await db.collection("settings").findOne({ type: "MISCELLANEOUS" });
 
@@ -55,6 +61,11 @@ export const convertUserTable = async (mysqlConn: any, mongoClient: any) => {
 
         for (const chunk of userChunks) {
             const usersToInsert = await Promise.all(chunk.map(async (user: any) => {
+                if (!user?.email) return;
+                if (process.env.MAKE_IT_YOPMAIL === 'true') {
+                    user.email = makeItYopmail(user.email)
+                }
+
                 const genderInfo = genderMapping[user.gender] || { genderId: null, genderNm: null };
                 const [verificationResults] = await mysqlConn.execute(`SELECT user_id, token FROM user_verifications WHERE user_id IN (?)`, [user.people_id]);
                 const tokenMapping = verificationResults.reduce((acc: any, verification: any) => {
@@ -63,11 +74,16 @@ export const convertUserTable = async (mysqlConn: any, mongoClient: any) => {
                 }, {});
 
                 const verificationToken = tokenMapping[user.user_id] || null;
-                const [companyDetails] = await mysqlConn.query(`SELECT c.* FROM person_companies pc JOIN companies c ON pc.company_id = c.id WHERE pc.person_id = ?; `, [user.people_id]);
+
+                let companyDetails
+                if (roleCode[rolename] === 'EMPLOYER') {
+                    companyDetails = await addCompaniesToEmployer(user, mysqlConn, db);
+                }
 
                 const licenceData = await assignDefaultLicence(user.user_id, db);
                 const countProfilePercentage = await migrateProfilePercentage(user, db);
 
+                console.info(`Processing user: ${user.name} (Email: ${user.email})`);
 
                 return {
                     importId: "DEV-45912",
@@ -101,7 +117,6 @@ export const convertUserTable = async (mysqlConn: any, mongoClient: any) => {
                     description: user.description,
                     jobTitle: user.job_title,
                     tz: "Asia/Kolkata",
-                    lastLogin: user.last_activity ? new Date(user.last_activity) : null,
                     canDel: true,
                     offNotification: false,
                     canChangePass: true,
@@ -123,36 +138,15 @@ export const convertUserTable = async (mysqlConn: any, mongoClient: any) => {
                     resumes: [],
                     aiSkills: [],
                     aiDomain: [],
-                    countryId: null,
-                    countryNm: null,
-                    stateId: null,
-                    stateNm: null,
-                    cityId: null,
-                    cityNm: null,
-                    customFields: {},
-                    profileId: null,
-                    profile: {
-                        nm: null,
-                        oriNm: null,
-                        type: null,
-                        exten: null,
-                        uri: null,
-                        mimeType: null,
-                        size: null,
-                        sts: null,
-                        dimensions: { height: null, width: null },
-                        preview: null,
-                        createdBy: null,
-                    },
                     experienceIds: {},
                     jobLevelId: {},
                     domain: [],
                     skillIds: [],
                     ind: [],
-                    profileCompleted: countProfilePercentage.percentage || 30,
+                    profileCompleted: countProfilePercentage.percentage || 10,
                     percentObj: countProfilePercentage.percentObj || {
                         basicDetails: 1,
-                        personalDetails: 1,
+                        personalDetails: 0,
                         industryDetails: 0,
                         educations: 0,
                         projects: 0,
@@ -169,12 +163,18 @@ export const convertUserTable = async (mysqlConn: any, mongoClient: any) => {
                             deviceDetail: null,
                         }
                     ],
-                    compId: companyDetails?.[0]?.id || undefined,
-                    compNm: companyDetails?.[0]?.name || undefined,
+
+                    ...(roleCode[rolename] === 'EMPLOYER' && {
+                        status: 2,
+                        type: 1,
+                        ...(companyDetails?._id && { compId: companyDetails._id }),
+                        ...(companyDetails?.compNm && { compNm: companyDetails.compNm }),
+                    }),
                 }
             }));
 
-            const bulkOps = usersToInsert.map(user => {
+            const bulkOperations = usersToInsert.filter((user): user is NonNullable<typeof user> => user !== null && user !== undefined && user.email);
+            const bulkOps = bulkOperations.map(user => {
                 return {
                     updateOne: {
                         filter: { importId: "DEV-45912", email: user.email },
@@ -187,6 +187,7 @@ export const convertUserTable = async (mysqlConn: any, mongoClient: any) => {
             if (bulkOps.length > 0) {
                 await db.collection("user").bulkWrite(bulkOps);
             }
+            await updateCompanyWithUserDetails(bulkOperations, db);
         }
         console.info(`Successfully migrated ${usersFromMySQL.length} users to MongoDB`);
     } catch (error) {
@@ -221,6 +222,7 @@ export const convertCountryTable = async (mysqlConn: any, mongoClient: any) => {
             }
         });
         const bulkOps = countriesToAdd.map((country: any) => {
+            console.info(`Processing country: ${country.name}`);
             return {
                 updateOne: {
                     filter: { importId: "DEV-45912", name: country.name },
@@ -262,6 +264,7 @@ export const convertCategoryTable = async (mysqlConn: any, mongoClient: any) => 
                 createdAt: new Date(category.created_at),
                 updatedAt: new Date(category.updated_at),
             };
+            console.info(`Processing category: ${category.name} (Slug: ${categoryData.slug})`);
 
             return {
                 updateOne: {
@@ -313,7 +316,9 @@ export const convertEducationTable = async (mysqlConn: any, mongoClient: any) =>
             const qualificationNmCache: any = await findOrCreateMaster(education.qualification, "EMPLOYEE_QUALIFICATION", db);
             const fieldOfStuNmCache: any = await findOrCreateMaster(education.field_of_study, "FIELD_OF_STUDY", db);
 
-            const user = await db.collection("user").findOne({ email: education.email })
+            const user = await db.collection("user").findOne({ email: education.email });
+
+            console.info(`Processing education: ${education.qualification}`);
 
             return {
                 importId: "DEV-45912",
@@ -384,6 +389,7 @@ export const convertExperienceTable = async (mysqlConn: any, mongoClient: any) =
 
         const bulkOperations = await Promise.all(experiencesRecords.map(async (experience: any) => {
             const user = await db.collection("user").findOne({ email: experience.email })
+            console.info(`Processing experience: ${experience.title}`);
 
             return {
                 importId: "DEV-45912",
@@ -432,7 +438,6 @@ export const convertResumeTable = async (mysqlConn: any, mongoClient: any) => {
             SELECT r.*, p.email 
             FROM resumes r
             JOIN people p ON r.person_id = p.id
-            WHERE r.id = '008da8df-457b-48c0-a57f-076c6e191a1f'
         `);
         const mimeType: MimeTypes = {
             'pdf': 'application/pdf',
@@ -449,16 +454,19 @@ export const convertResumeTable = async (mysqlConn: any, mongoClient: any) => {
             return 'application/octet-stream';
         };
         const bulkOperations = await Promise.all(resumesRecords.map(async (resume: any) => {
-            const user = await db.collection("user").findOne({ email: resume.email })
+            const user = await db.collection("user").findOne({ email: resume.email });
             resume.person_attributes = resume.person_attributes ? JSON.parse(resume.person_attributes) : null;
-            const type = getMimeTypeFromFileName(resume.cv_path)
+            const type = resume?.cv_path ? getMimeTypeFromFileName(resume.cv_path) : null;
+
+            console.info(`Processing resume: ${resume.title}`);
+
             return {
                 importId: "DEV-45912",
                 userId: user?._id || null,
                 nm: resume.title,
                 oriNm: resume.name || resume.title,
                 type: type,
-                exten: resume.cv_path.split('.').pop(),
+                exten: resume?.cv_path ? resume.cv_path.split('.').pop() : null,
                 uri: resume.cv_path,
                 mimeType: type,
                 size: resume.person_attributes ? resume.person_attributes?.size : 0,
@@ -499,11 +507,13 @@ export const convertAttachmentTable = async (mysqlConn: any, mongoClient: any) =
                 SELECT atc.*, p.email AS userEmail  
                 FROM attachments atc
                 JOIN users p ON atc.created_by = p.id
-                WHERE atc.id = '85256c35-5cdc-4597-9c41-2d5e75a02da5'
             `);
 
         const bulkOperations = await Promise.all(attachmentsRecords.map(async (attach: any) => {
-            const user = await db.collection("user").findOne({ email: attach.userEmail })
+            const user = await db.collection("user").findOne({ email: attach.userEmail });
+
+            console.info(`Processing resume: ${attach.name}`);
+
             return {
                 importId: "DEV-45912",
                 userId: user?._id || null,
@@ -567,25 +577,34 @@ export const convertCompanyTable = async (mysqlConn: any, mongoClient: any) => {
                 cm.video_url,
                 cm.vr_url,
                 p.email AS employerEmail,
+                u.email AS userEmail,
                 att.name AS logoURL,
-                att.created_by AS attachCreateBy
+                att.created_by AS attachCreateBy,
+                    JSON_OBJECT(
+                    'personId', pc.person_id,
+                    'companyId', pc.company_id,
+                    'role', pc.role
+                ) AS personCompanies
             FROM companies cm
             LEFT JOIN people p ON cm.created_by = p.id
-            LEFT JOIN attachments att ON cm.logo_id = att.id
-            WHERE cm.id = '0090fafc-1249-48b5-9115-5658e8d8fa53';
+            LEFT JOIN users u ON cm.created_by = u.id
+            LEFT JOIN person_companies pc ON cm.created_by = pc.person_id
+            LEFT JOIN attachments att ON cm.logo_id = att.id;
         `);
 
         const bulkOperations = await Promise.all(companiesRecords.map(async (company: any) => {
-            const user = await db.collection("user").findOne({ email: company.employerEmail })
-            const logoFile = await db.collection("file").findOne({ userId: user._id, nm: company.logoURL, importId: "DEV-45912" })
+            const user = await db.collection("user").findOne({ email: { $in: [company.employerEmail, company.userEmail] } });
+            const logoFile = user && await db.collection("file").findOne({ userId: user._id, nm: company.logoURL, importId: "DEV-45912" });
             const parsedAddress = parseAddress(company.address);
+
+            console.info(`Processing company: ${company.name}`);
 
             return {
                 importId: "DEV-45912",
                 compNm: company.name,
                 slug: company.slug,
                 licenceNo: company.licenceNo || undefined,
-                userIds: [],
+                userIds: user?._id ? [user?._id] : [],
                 conPer: {
                     nm: company.nm,
                     mobileNo: company.phone,
@@ -604,19 +623,9 @@ export const convertCompanyTable = async (mysqlConn: any, mongoClient: any) => {
                     zipCode: parsedAddress.zipCode,
                 },
                 isActive: !!company.isActive,
-                aboutUs: company.aboutUs || undefined,
                 benefits: company.benefits || undefined,
                 compDomains: company.compDomains || undefined,
-                compType: company.compType || undefined,
-                compSize: company.compSize || undefined,
-                compFoundedAt: company.compFoundedAt || undefined,
-                bannerId: company.bannerId || undefined,
-                customFields: company.customFields || undefined,
                 createdBy: user?._id || null,
-                videoUrl: company.video_url || undefined,
-                vrUrl: company.vr_url || undefined,
-                cityNm: company.cityNm || undefined,
-                countryNm: company.countryNm || undefined,
                 isDefault: false,
                 createdAt: company.createdAt,
                 updatedAt: company.updatedAt,
@@ -639,6 +648,7 @@ export const convertCompanyTable = async (mysqlConn: any, mongoClient: any) => {
         if (bulkOps.length > 0) {
             await db.collection("company").bulkWrite(bulkOps);
         }
+        // await updateUserWithCompanyDetails(bulkOperations, db);
         console.info(`Successfully migrated ${bulkOps.length} Companies to MongoDB`);
     } catch (error) {
         console.error("Error - convertCompanyTable", error);
@@ -659,6 +669,9 @@ export const convertCityTable = async (mysqlConn: any, mongoClient: any) => {
 
         const citiesToAdd = await Promise.all(cities.map(async (city: any) => {
             const country = await db.collection("country").findOne({ name: city.countryName });
+
+            console.info(`Processing city: ${city.name}`);
+
             return {
                 importId: "DEV-45912",
                 name: city.name,
@@ -748,6 +761,8 @@ export const convertJobTable = async (mysqlConn: any, mongoClient: any) => {
             const city = await db.collection("city").findOne({ name: job.cityName, importId: "DEV-45912" });
             const user = await db.collection("user").findOne({ email: job.createdByEmail, importId: "DEV-45912" });
 
+            console.info(`Processing job: ${job.title}`);
+
             return {
                 importId: "DEV-45912",
                 title: job.title,
@@ -812,6 +827,249 @@ export const convertJobTable = async (mysqlConn: any, mongoClient: any) => {
         console.info(`Successfully migrated ${bulkOps.length} Jobs to MongoDB`);
     } catch (error) {
         console.error("Error - convertJobTable", error);
+        throw error;
+    }
+};
+
+export const convertUserJobsTable = async (mysqlConn: any, mongoClient: any) => {
+    try {
+        const db = mongoClient.db(database);
+        const [appliesRecords] = await mysqlConn.query(`
+            SELECT 
+                a.*, 
+                r.title AS resumeTitle,
+                j.title AS jobTitle,
+                j.slug AS jobSlug,
+                p.email  AS userEmail
+            FROM 
+                applies a
+            LEFT JOIN 
+                resumes r ON a.resume_id = r.id
+            LEFT JOIN 
+                jobs j ON a.job_id = j.id
+            LEFT JOIN 
+                people p ON a.person_id = p.id
+            WHERE a.id="49865d6a-46f4-4479-801b-52317de99cf3";
+            `,)
+
+        const statusMapping: any = {
+            PENDING: 'APPLIED',
+            SELECTED: 'HIRED',
+            REFUSED: 'REJECTED'
+        };
+        const statusMaster = await db.collection("master").find({ parentCode: "APPLICATION_STATUS" }).toArray();
+        const statusDict = statusMaster.reduce((acc: any, status: any) => {
+            acc[status.code] = status;
+            return acc;
+        }, {});
+
+        const bulkOperations = await Promise.all(appliesRecords.map(async (apply: any) => {
+            const user = await db.collection("user").findOne({ email: apply.userEmail, importId: "DEV-45912" });
+            const job = await db.collection("jobs").findOne({ title: apply.jobTitle, slug: apply.jobSlug, importId: "DEV-45912" });
+
+            const status: any = statusDict[statusMapping[apply.status]] || null;
+
+            console.info(`Processing userJobs: ${apply.userEmail}`);
+
+            return {
+                importId: "DEV-45912",
+                jobId: job?._id || null,
+                jobTitle: job?.title || null,
+                userId: user?._id || null,
+                resumeObj: user?.resumes ? user.resumes.filter((resume: any) => resume.oriNm === apply.resumeTitle)[0] : {},
+                questions: [],
+                statusId: status?._id,
+                statusNm: status?.names,
+                createdBy: user?._id || null,
+                updatedBy: user?._id ? [user?._id] : [],
+                createdAt: apply.created_at,
+                updatedAt: apply.updated_at,
+            };
+        }));
+        const bulkOps = bulkOperations.map(bulkOp => {
+            return {
+                updateOne: {
+                    filter: {
+                        importId: "DEV-45912",
+                        jobId: bulkOp.jobId,
+                        userId: bulkOp.userId
+                    },
+                    update: { $set: bulkOp },
+                    upsert: true,
+                }
+            }
+        });
+
+        if (bulkOps.length > 0) {
+            await db.collection("userjobs").bulkWrite(bulkOps);
+        }
+        console.info(`Successfully migrated ${bulkOps.length} UserJobs to MongoDB`);
+    } catch (error) {
+        console.error("Error - convertUserJobsTable", error);
+        throw error;
+    }
+};
+
+export const convertJobsTrackTable = async (mysqlConn: any, mongoClient: any) => {
+    try {
+        const db = mongoClient.db(database);
+        const [bookmarksRecords] = await mysqlConn.query(`
+            SELECT
+                pb.*,
+                j.title AS jobTitle,
+                j.slug AS jobSlug,
+                p.email  AS userEmail
+            FROM 
+                person_bookmarks pb
+            LEFT JOIN 
+                people p ON pb.person_id = p.id
+            LEFT JOIN 
+                jobs j ON pb.job_id = j.id
+            WHERE pb.job_id = '0478e109-eb41-4816-983e-a0cddd1d0ae5' AND pb.person_id = 'b9fe7aec-71e6-4a91-bd4b-ad11c3be0f5a'
+            `)
+        const bulkOperations = await Promise.all(bookmarksRecords.map(async (bookMark: any) => {
+            const user = await db.collection("user").findOne({ email: bookMark.userEmail, importId: "DEV-45912" });
+            const job = await db.collection("jobs").findOne({ title: bookMark.jobTitle, slug: bookMark.jobSlug, importId: "DEV-45912" });
+
+            console.info(`Processing jobsTrack: ${bookMark.userEmail}`);
+
+            return {
+                importId: "DEV-45912",
+                type: 2,
+                jobId: job?._id || null,
+                jobTitle: job?.title || null,
+                userId: user?._id || null,
+                createdBy: user?._id || null,
+                updatedBy: user?._id ? [user?._id] : [],
+                createdAt: new Date(),
+                updatedAt: new Date(),
+            };
+        }));
+        const bulkOps = bulkOperations.map(bulkOp => {
+            return {
+                updateOne: {
+                    filter: {
+                        importId: "DEV-45912",
+                        jobId: bulkOp.jobId,
+                        userId: bulkOp.userId
+                    },
+                    update: { $set: bulkOp },
+                    upsert: true,
+                }
+            }
+        });
+
+        if (bulkOps.length > 0) {
+            await db.collection("jobsTracks").bulkWrite(bulkOps);
+        }
+        console.info(`Successfully migrated ${bulkOps.length} JobsTrack to MongoDB`);
+    } catch (error) {
+        console.error("Error - convertJobsTrackTable", error);
+        throw error;
+    }
+};
+
+export const convertCertificateTable = async (mysqlConn: any, mongoClient: any) => {
+    try {
+        const db = mongoClient.db(database);
+        const [certificatesRecords] = await mysqlConn.query(`
+            SELECT
+                c.*,
+                p.email AS userEmail
+            FROM 
+                courses c
+            LEFT JOIN 
+                people p ON c.person_id = p.id
+                
+            WHERE c.id = '247799bd-5bcd-4dac-af2f-06647569b9dc'
+            `)
+
+        const bulkOperations = await Promise.all(certificatesRecords.map(async (certi: any) => {
+            const user = await db.collection("user").findOne({ email: certi?.userEmail, importId: "DEV-45912" });
+
+            console.info(`Processing certificate: ${certi.name}`);
+
+            return {
+                importId: "DEV-45912",
+                title: certi?.name,
+                userId: user?._id || null,
+                issueOrg: certi?.authority,
+                isApproved: false,
+                date: certi?.period_start,
+                issueAt: certi?.period_start,
+                expiredAt: certi?.period_end,
+                createdBy: user?._id || null,
+                updatedBy: user?._id ? [user?._id] : [],
+                createdAt: certi?.created_at,
+                updatedAt: certi?.updated_at,
+            };
+        }));
+        const bulkOps = bulkOperations.map(bulkOp => {
+            return {
+                updateOne: {
+                    filter: {
+                        importId: "DEV-45912",
+                        userId: bulkOp.userId,
+                        title: bulkOp.title,
+                    },
+                    update: { $set: bulkOp },
+                    upsert: true,
+                }
+            }
+        });
+
+        if (bulkOps.length > 0) {
+            await db.collection("certificates").bulkWrite(bulkOps);
+        }
+        console.info(`Successfully migrated ${bulkOps.length} Certificates to MongoDB`);
+    } catch (error) {
+        console.error("Error - convertCertificateTable", error);
+        throw error;
+    }
+};
+
+export const calculatePercentageOfUsers = async (mysqlConn: any, mongoClient: any) => {
+    try {
+        const db = mongoClient.db(database);
+        const [usersRecords] = await mysqlConn.query(`
+            SELECT 
+                u.id AS user_id, 
+                u.*, 
+                p.id AS people_id,
+                p.*,
+                ru.role_id, 
+                r.id AS role_id_in_roles, 
+                r.name AS role_name
+            FROM role_user ru
+            INNER JOIN roles r ON ru.role_id = r.id
+            INNER JOIN users u ON ru.user_id = u.id
+            LEFT JOIN people p ON u.email = p.email;
+            `);
+
+        await Promise.all(usersRecords.map(async (user: any) => {
+            const userD = await db.collection("user").findOne({ email: user?.email, importId: "DEV-45912" });
+            if (!userD) return;
+
+            const countProfilePercentage = await migrateProfilePercentage(user, db);
+            const result = {
+                profileCompleted: countProfilePercentage.percentage || 10,
+                percentObj: countProfilePercentage.percentObj || {
+                    basicDetails: 1,
+                    personalDetails: 0,
+                    industryDetails: 0,
+                    educations: 0,
+                    projects: 0,
+                    experiences: 0,
+                    certificates: 0,
+                    accomplishments: 0,
+                },
+            }
+            return await db.collection("user").findOneAndUpdate({ _id: userD._id }, { $set: { profileCompleted: result.profileCompleted, percentObj: result.percentObj } }, { new: true })
+        }));
+        console.info(`Successfully updated users profile percentage to DB`);
+        return true;
+    } catch (error) {
+        console.error("Error - calculatePercentageOfUsers", error);
         throw error;
     }
 };
