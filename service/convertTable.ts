@@ -1105,25 +1105,10 @@ export const convertCertificateTable = async (mysqlConn: any, mongoClient: any) 
 export const calculatePercentageOfUsers = async (mysqlConn: any, mongoClient: any) => {
     try {
         const db = mongoClient.db(database);
-        const [usersRecords] = await mysqlConn.query(`
-            SELECT 
-                u.id AS user_id, 
-                u.*, 
-                p.id AS people_id,
-                p.*,
-                ru.role_id, 
-                r.id AS role_id_in_roles, 
-                r.name AS role_name
-            FROM role_user ru
-            INNER JOIN roles r ON ru.role_id = r.id
-            INNER JOIN users u ON ru.user_id = u.id
-            LEFT JOIN people p ON u.email = p.email;
-            `);
+        const userList = await db.collection("user").find({ importId: "DEV-45912" }).toArray();
+        if (userList.length === 0) return null;
 
-        await Promise.all(usersRecords.map(async (user: any) => {
-            const userD = await db.collection("user").findOne({ email: user?.email, importId: "DEV-45912" });
-            if (!userD) return null;
-
+        for (const user of userList) {
             const countProfilePercentage = await migrateProfilePercentage(user, db);
             const result = {
                 profileCompleted: countProfilePercentage.percentage || 10,
@@ -1138,10 +1123,10 @@ export const calculatePercentageOfUsers = async (mysqlConn: any, mongoClient: an
                     accomplishments: 0,
                 },
             }
-
-            return await db.collection("user").findOneAndUpdate({ _id: userD._id }, { $set: { profileCompleted: result.profileCompleted, percentObj: result.percentObj } }, { new: true })
-        }));
-        console.info(`Successfully updated ${usersRecords.length} users profile percentage to DB`);
+            await db.collection("user").findOneAndUpdate({ _id: user._id }, { $set: { profileCompleted: result.profileCompleted, percentObj: result.percentObj } }, { new: true })
+            console.info(`Calculating percentage for user: ${user.name} (${user.email})`);
+        }
+        console.info(`Updated ${userList.length} user profiles with percentage in MongoDB`);
         return true;
     } catch (error) {
         console.error("Error - calculatePercentageOfUsers", error);
