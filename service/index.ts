@@ -2,9 +2,10 @@ import { convertUserTable, convertJobTable, convertCountryTable, convertCategory
 
 export const main = async (mysqlConn: any, mongoClient: any) => {
     try {
+        await convertUserTable(mysqlConn, mongoClient, 'punekerkues');
+        await convertUserTable(mysqlConn, mongoClient, 'punedhenes');
         await convertCompanyTable(mysqlConn, mongoClient);
         await convertAttachmentTable(mysqlConn, mongoClient);
-        await convertUserTable(mysqlConn, mongoClient);
         await convertResumeTable(mysqlConn, mongoClient);
         await convertEducationTable(mysqlConn, mongoClient);
         await convertExperienceTable(mysqlConn, mongoClient);
