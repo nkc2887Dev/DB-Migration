@@ -109,26 +109,25 @@ export const createCode = async (str: string) => {
 export const findOrCreateMaster = async (masterNm: any, parentCode: any, db: any) => {
     try {
         const Master = await db.collection("master");
-        if (masterNm) {
-            const masterCode = await createCode(masterNm)
-            const parentMaster = await Master.findOne({ code: parentCode })
-            let master = parentMaster && await Master.findOneAndUpdate(
-                { code: masterCode },
-                {
-                    $set: {
-                        importId: "DEV-45912",
-                        name: masterNm,
-                        code: masterCode,
-                        parentId: parentMaster._id,
-                        parentCode: parentCode,
-                        names: { en: masterNm, id: masterNm }
-                    }
-                },
-                { new: true, upsert: true }
-            );
-            return ({ _id: master._id, names: master.names })
-        }
-        return false;
+        const masterCode = await createCode(masterNm)
+        const parentMaster = parentCode ? await Master.findOne({ code: parentCode }) : null;
+        const parentId = parentMaster?._id || null;
+        await Master.findOneAndUpdate(
+            { code: masterCode },
+            {
+                $set: {
+                    importId: "DEV-45912",
+                    name: masterNm,
+                    code: masterCode,
+                    parentId,
+                    parentCode,
+                    names: { en: masterNm, id: masterNm }
+                }
+            },
+            { new: true, upsert: true }
+        );
+        const master = await Master.findOne({ code: masterCode });
+        return { _id: master._id, names: master.names };
     } catch (error) {
         console.error("Error-findOrCreateMaster", error)
         return false
@@ -146,7 +145,8 @@ export const updateUserQualificationsWithDetails = async (educationRecords: any,
                 qualificationNm: education.qualificationNm,
                 fieldOfStuNm: education.fieldOfStuNm,
             }));
-            await db.collection("user").findOneAndUpdate({ _id: education.userId }, { $set: { qualifications } }, { new: true })
+            await db.collection("user").findOneAndUpdate({ _id: education.userId }, { $set: { qualifications } }, { new: true });
+            console.info(`Processing update user with qualification details: ${education.institutionId}`);
         }));
 
         console.info(`Successfully updated ${userQualifications.length} users with qualifications.`);
@@ -168,7 +168,8 @@ export const updateUserExperienceWithDetails = async (experiencesRecords: any, d
                     "id": experience.title,
                 },
             }));
-            await db.collection("user").findOneAndUpdate({ _id: experience.userId }, { $set: { experienceIds } }, { new: true })
+            await db.collection("user").findOneAndUpdate({ _id: experience.userId }, { $set: { experienceIds } }, { new: true });
+            console.info(`Processing update user with experience details: ${experience.title}`);
         }));
 
         console.info(`Successfully updated ${userExperience.length} users with experiences.`);
@@ -191,7 +192,7 @@ export const updateUserResumeWithDetails = async (resumesRecords: any, db: any) 
                 prevUsed: false,
                 createdAt: resume.createdAt,
             }));
-            await db.collection("user").findOneAndUpdate({ _id: resume.userId }, { $set: { resumes, resumeHeaders: process.env.USER_TABS_HEADER, resumeFileId: resumesFromFile[0]._id } }, { new: true })
+            await db.collection("user").findOneAndUpdate({ _id: resume.userId }, { $set: { resumes, resumeHeaders: USER_TABS_HEADER, resumeFileId: resumesFromFile[0]._id } }, { new: true })
             console.info(`Processing update user with resume details: ${resume.oriNm}`);
         }));
 
@@ -208,6 +209,7 @@ export const updateUserWithCompanyDetails = async (companyRecords: any, db: any)
             const companyDetails = await db.collection("company").findOne({ importId: 'DEV-45912', compNm: company.name, slug: company.slug });
             if (!companyRecords?.userIds?.[0]) return;
             await db.collection("user").findOneAndUpdate({ _id: companyRecords.userIds[0] }, { $set: { compId: companyDetails._id, compNm: companyDetails.name } }, { new: true })
+            console.info(`Processing update user with comapny details: ${company.name}`);
             return;
         }));
     } catch (error) {
@@ -216,16 +218,57 @@ export const updateUserWithCompanyDetails = async (companyRecords: any, db: any)
     }
 };
 
-export const updateCompanyWithUserDetails = async (bulkOperations: any, db: any) => {
+export const updateCompanyWithUserDetails = async (mysqlConn: any, bulkOperations: any, db: any) => {
     try {
         return await Promise.all(bulkOperations.map(async (user: any) => {
-            if (!user?.compId && !user.email) return;
+            if (!user?.compId && !user.email) return null;
             const userEmail = await db.collection("user").findOne({ email: user.email });
-            await db.collection("company").findOneAndUpdate({ _id: user.compId }, { $set: { userIds: [userEmail._id] } }, { new: true });
+            const [attachmentsRecords] = await mysqlConn.query(`
+                SELECT atc.*, p.email AS userEmail  
+                FROM attachments atc
+                JOIN users p ON atc.created_by = p.id
+                WHERE p.email = ?;
+            `, [user.email]);
+
+            const attach = attachmentsRecords?.[0] || null;
+            if(!attach && attachmentsRecords.length === 0) return null;
+            await db.collection("file").findOneAndUpdate({ userId: userEmail._id, nm: attach.name, importId: "DEV-45912" }, {
+                $set: {
+                    importId: "DEV-45912",
+                    userId: userEmail?._id,
+                    nm: attach.name,
+                    oriNm: attach.name,
+                    type: attach.mime_type,
+                    exten: attach.path.split('.').pop(),
+                    uri: attach.path,
+                    sts: 2,
+                    mimeType: attach.mime_type,
+                    createdAt: attach.created_at,
+                    updatedAt: attach.updated_at,
+                }
+            }, { new: true, upsert: true });
+
+            const logoFile = await db.collection("file").findOne({ userId: userEmail._id, nm: attach.name, importId: "DEV-45912" });
+            await db.collection("company").findOneAndUpdate({ _id: user.compId }, { $set: { userIds: [userEmail._id], ...(logoFile ? { logoId: logoFile._id } : {}) } }, { new: true });
+            console.info(`Processing update company with user details: ${user.email}`);
             return true;
         }));
     } catch (error) {
         console.error("Error - updateCompanyWithUserDetails", error);
+        throw error;
+    }
+};
+
+export const updateUserAndJobsDetails = async (bulkOperations: any, db: any) => {
+    try {
+        return await Promise.all(bulkOperations.map(async (userJobs: any) => {
+            if (!userJobs?.jobId || !userJobs?.userId) return null;
+            await db.collection("user").findOneAndUpdate({ _id: userJobs.userId }, { $inc: { 'jobs.appliedJobCount': 1 } }, { new: true });
+            await db.collection("jobs").findOneAndUpdate({ _id: userJobs.jobId }, { $inc: { appliedCount: 1 } }, { new: true });
+            return true;
+        }));
+    } catch (error) {
+        console.error("Error - updateUserAndJobsDetails", error);
         throw error;
     }
 };
@@ -246,30 +289,83 @@ export const parseAddress = (addressString: string) => {
 export const makeItYopmail = (email: string) => {
     email = email?.split('@')[0] + '@yopmail.com';
     return email
-}
+};
 
 export const addCompaniesToEmployer = async (user: any, mysqlConn: any, db: any) => {
     try {
-        let companyDetails;
-        const [mysqlCompany] = await mysqlConn.query(`SELECT * FROM companies WHERE created_by = ?;`, [user.people_id]);
+        // const [mysqlCompany] = await mysqlConn.query(`SELECT * FROM companies WHERE created_by = ?;`, [user.people_id]);
+        const [mysqlCompany] = await mysqlConn.query(`SELECT
+                cm.id AS companyId,
+                cm.name,
+                cm.slug,
+                cm.nui AS licenceNo,
+                cm.description AS aboutUs,
+                cm.phone AS phone,
+                cm.email,
+                cm.address,
+                cm.website AS compWebURL,
+                cm.city AS cityNm,
+                cm.country AS countryNm,
+                cm.logo_id AS logoId,
+                cm.created_by AS updatedBy,
+                cm.extra_attributes AS customFields,
+                cm.created_at AS createdAt,
+                cm.updated_at AS updatedAt,
+                cm.og_image_id AS bannerId,
+                cm.is_visible AS isActive,
+                cm.video_url,
+                cm.vr_url,
+                p.email AS employerEmail,
+                att.name AS logoURL,
+                att.created_by AS attachCreateBy,
+                    JSON_OBJECT(
+                    'personId', pc.person_id,
+                    'companyId', pc.company_id,
+                    'role', pc.role
+                ) AS personCompanies
+            FROM companies cm
+            LEFT JOIN people p ON cm.created_by = p.id
+            LEFT JOIN person_companies pc ON cm.created_by = pc.person_id
+            LEFT JOIN attachments att ON cm.logo_id = att.id
+            WHERE cm.created_by = ?;
+        `, [user.people_id]);
 
         if (mysqlCompany && mysqlCompany.length > 0) {
-            companyDetails = await db.collection("company").findOneAndUpdate(
-                { compNm: mysqlCompany[0].name },
+            let { name, slug, nm, logoURL, employerEmail, logoId, address, licenceNo, isActive, compWebURL, compLinkedInURL, profilePercent, benefits, compDomains, createdAt, updatedAt } = mysqlCompany[0];
+
+            const parsedAddress = parseAddress(address);
+            await db.collection("company").findOneAndUpdate(
+                { compNm: name, slug: slug, importId: "DEV-45912" },
                 {
                     $set: {
-                        importId:"DEV-45912",
-                        isActive: true,
+                        importId: "DEV-45912",
+                        isActive: !!isActive,
                         isDefault: false,
-                        compNm: mysqlCompany[0].name,
-                        slug: mysqlCompany[0].slug,
+                        compNm: name,
+                        slug: slug,
                         conPer: {
+                            name: nm || user.name,
                             mobileNo: user.phone,
                             email: user.email
                         },
                         userIds: [],
-                        createdAt: new Date(),
-                        updatedAt: new Date()
+                        licenceNo: licenceNo || undefined,
+
+                        compWebURL: compWebURL,
+                        compLinkedInURL: compLinkedInURL,
+                        profilePercent: profilePercent || 0,
+                        address: {
+                            street: parsedAddress.street,
+                            address1: parsedAddress.address1,
+                            countryNm: parsedAddress.countryNm,
+                            cityNm: parsedAddress.cityNm,
+                            zipCode: parsedAddress.zipCode,
+                        },
+                        benefits: benefits || undefined,
+                        compDomains: compDomains || undefined,
+                        createdBy: user?._id || null,
+                        createdAt: createdAt,
+                        updatedAt: updatedAt,
                     }
                 },
                 {
@@ -277,17 +373,19 @@ export const addCompaniesToEmployer = async (user: any, mysqlConn: any, db: any)
                     upsert: true,
                 }
             );
+            return await db.collection("company").findOne({ compNm: name, slug: slug, importId: "DEV-45912" });
         } else {
-            companyDetails = await db.collection("company").findOneAndUpdate(
-                { compNm: user?.name },
+            await db.collection("company").findOneAndUpdate(
+                { compNm: user.name },
                 {
                     $set: {
-                        importId:"DEV-45912",
+                        importId: "DEV-45912",
                         isActive: true,
                         isDefault: false,
                         compNm: user.name,
                         slug: slugify(user.name),
                         conPer: {
+                            name: user.name,
                             mobileNo: user.phone,
                             email: user.email
                         },
@@ -297,12 +395,12 @@ export const addCompaniesToEmployer = async (user: any, mysqlConn: any, db: any)
                     }
                 }, {
                 new: true,
-                upsert: true,
+                upsert: true
             });
+            return await db.collection("company").findOne({ compNm: user.name, importId: "DEV-45912" });
         }
-        return companyDetails;
     } catch (error) {
         console.error("Error - addCompaniesToEmployer", error);
         throw error;
     }
-}
+};
