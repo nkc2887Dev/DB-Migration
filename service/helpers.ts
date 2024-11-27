@@ -20,45 +20,99 @@ const idGenerator = async (type: string, db: any) => {
     return series.prefix + series.startFrom.toString() + series.suffix;
 };
 
-export const assignDefaultLicence = async (userId: string, db: any) => {
-    const CandidateMaster = await db.collection("master").findOne({ code: "CANDIDATE" });
+export const assignDefaultLicence = async (userId: string, db: any, roleCode: any) => {
+    const userDetails = await db.collection("user").findOne({ _id: userId })
 
-    let subscriptionData;
-    subscriptionData = await db.collection("subscriptions").findOne({
+    const roleMap: any = {
+        CANDIDATE: "CANDIDATE",
+        EMPLOYER: "PLANS",
+        ADMIN: "ADMIN",
+    };
+    const CandidateMaster = await db.collection("master").findOne({ code: roleMap[roleCode] });
+
+    const subscriptionData = await db.collection("subscriptions").findOne({
         typeId: CandidateMaster._id || null,
         isDefault: true,
     });
 
-    if (!subscriptionData) {
-        return null;
-    }
+    if (!subscriptionData) return null;
 
     const currency = await db.collection("settings").findOne({ type: "MISCELLANEOUS" });
+    const expireAt = new Date();
+    const expireAtCopy = new Date(expireAt);
+    expireAtCopy.setMonth(expireAtCopy.getMonth() + 1);
 
-    let orderData = {
-        importId: "DEV-45912",
-        subscriptionId: subscriptionData._id,
-        jobLimit: subscriptionData.jobLimit,
-        jobUnlimited: subscriptionData.jobUnlimited,
-        subTypeNm: "CANDIDATE",
-        isActive: true,
-        expireAt: new Date().setMonth(new Date().getMonth() + 1),
-        orderNo: await idGenerator("1", db),
-        sts: "SUCCESS",
-        userId: userId,
-        currency: currency?.currencyType?.label?.en || "INR",
-    };
+    if (roleCode === "CANDIDATE") {
+        await assignDefaultLicenceToCandidate(userDetails, subscriptionData, currency, expireAtCopy, db);
+    } else if (roleCode === "EMPLOYER") {
+        await assignDefaultLicenceToEmployer(userDetails, subscriptionData, currency, expireAtCopy, db);
+    }
 
-    await db.collection("order").updateMany(
-        { subTypeNm: "CANDIDATE", userId: userId },
-        { $set: { isActive: false, importId: "DEV-45912" } }
-    );
-
-    await db.collection("order").insertOne(orderData);
-
+    await db.collection("user").findOneAndUpdate({ _id: userId }, { $set: { licenceId: subscriptionData._id || null, "jobs.jobApplicationLimit": subscriptionData.jobLimit || 0 } }, { new: true });
     return { licenceId: subscriptionData._id, jobLimit: subscriptionData.jobLimit, jobApplicationLimit: subscriptionData.jobLimit };
 };
 
+export const assignDefaultLicenceToCandidate = async (userDetails: any, subscriptionData: any, currency: any, expireAtCopy: any, db: any) => {
+    try {
+        const orderData = {
+            importId: "DEV-45912",
+            subscriptionId: subscriptionData._id,
+            jobLimit: subscriptionData.jobLimit,
+            jobUnlimited: subscriptionData.jobUnlimited,
+            subTypeNm: "CANDIDATE",
+            isActive: true,
+            expireAt: expireAtCopy,
+            orderNo: await idGenerator("1", db),
+            sts: 1,
+            userId: userDetails._id,
+            currency: currency?.currencyType?.label?.en || "INR",
+        };
+
+        await db.collection("order").updateMany(
+            { subTypeNm: "CANDIDATE", userId: userDetails._id },
+            { $set: { isActive: false, importId: "DEV-45912" } }
+        );
+
+        await db.collection("order").insertOne(orderData);
+        return;
+    } catch (error) {
+        console.error("Error - assignDefaultLicenceToCandidate", error);
+        throw error;
+    }
+};
+
+export const assignDefaultLicenceToEmployer = async (userDetails: any, subscriptionData: any, currency: any, expireAtCopy: any, db: any) => {
+    try {
+        let orderData = {
+            importId: "DEV-45912",
+            userId: userDetails?._id,
+            compId: userDetails?.compId,
+            sts: 1,
+            subscriptionId: subscriptionData._id,
+            expireAt: expireAtCopy,
+            isActive: true,
+            subTypeNm: "ADMIN",
+            totJobs: subscriptionData.totJobs,
+            perMonCanPre: subscriptionData.perMonCanPre,
+            totalNoOfUser: subscriptionData.totalNoOfUser,
+            orderNo: await idGenerator("1", db),
+            currency: currency?.currencyType?.label?.en || "INR",
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            receiptId: null,
+            receiptNo: null,
+        };
+        await db.collection("order").updateMany(
+            { subTypeNm: "ADMIN", userId: userDetails._id },
+            { $set: { isActive: false, importId: "DEV-45912" } }
+        );
+
+        await db.collection("order").insertOne(orderData);
+    } catch (error) {
+        console.error("Error - assignDefaultLicenceToEmployer", error);
+        throw error;
+    }
+};
 
 export const migrateProfilePercentage = async (user: any, db: any) => {
     try {
@@ -192,7 +246,7 @@ export const updateUserResumeWithDetails = async (resumesRecords: any, db: any) 
                 prevUsed: false,
                 createdAt: resume.createdAt,
             }));
-            await db.collection("user").findOneAndUpdate({ _id: resume.userId }, { $set: { resumes, resumeHeaders: USER_TABS_HEADER, resumeFileId: resumesFromFile[0]._id } }, { new: true })
+            await db.collection("user").findOneAndUpdate({ _id: resume.userId }, { $set: { resumes, resumeHeaders: process.env.USER_TABS_HEADER, resumeFileId: resumesFromFile[0]._id } }, { new: true })
             console.info(`Processing update user with resume details: ${resume.oriNm}`);
         }));
 
@@ -218,20 +272,23 @@ export const updateUserWithCompanyDetails = async (companyRecords: any, db: any)
     }
 };
 
-export const updateCompanyWithUserDetails = async (mysqlConn: any, bulkOperations: any, db: any) => {
+export const updateCompanyWithUserDetails = async (mysqlConn: any, bulkOperations: any, db: any, roleCode: any) => {
     try {
         return await Promise.all(bulkOperations.map(async (user: any) => {
             if (!user?.compId && !user.email) return null;
             const userEmail = await db.collection("user").findOne({ email: user.email });
+            userEmail && await assignDefaultLicence(userEmail._id, db, roleCode);
             const [attachmentsRecords] = await mysqlConn.query(`
-                SELECT atc.*, p.email AS userEmail  
+                SELECT atc.* 
                 FROM attachments atc
                 JOIN users p ON atc.created_by = p.id
-                WHERE p.email = ?;
-            `, [user.email]);
+                JOIN people pe ON atc.created_by = pe.id
+                WHERE p.email = ? OR pe.email = ?;
+            `, [user.email, user.email]);
+            
 
             const attach = attachmentsRecords?.[0] || null;
-            if(!attach && attachmentsRecords.length === 0) return null;
+            if (!attach && attachmentsRecords.length === 0) return null;
             await db.collection("file").findOneAndUpdate({ userId: userEmail._id, nm: attach.name, importId: "DEV-45912" }, {
                 $set: {
                     importId: "DEV-45912",
@@ -240,7 +297,7 @@ export const updateCompanyWithUserDetails = async (mysqlConn: any, bulkOperation
                     oriNm: attach.name,
                     type: attach.mime_type,
                     exten: attach.path.split('.').pop(),
-                    uri: attach.path,
+                    uri: `telegrafi/${attach.path}`,
                     sts: 2,
                     mimeType: attach.mime_type,
                     createdAt: attach.created_at,

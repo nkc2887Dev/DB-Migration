@@ -9,8 +9,9 @@ const app = express();
 
 (async () => {
     const mongoClient = await connectionOfMongo();
-    const mysqlConn = await connectionOfMySQL();
-    await main(mysqlConn, mongoClient);
+    // const mysqlConn = await connectionOfMySQL();
+    const mysqlPool = connectionOfMySQL;
+    await main(mysqlPool, mongoClient);
 })();
 
 app.listen("7855", () => {

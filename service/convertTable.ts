@@ -11,8 +11,9 @@ type MimeTypes = {
     docx: string;
 };
 
-export const convertUserTable = async (mysqlConn: any, mongoClient: any, rolename: string) => {
+export const convertUserTable = async (mysqlPool: any, mongoClient: any, rolename: string) => {
     try {
+        const mysqlConn = await mysqlPool.getConnection();
         const db = mongoClient.db(database);
         const [usersFromMySQL] = await mysqlConn.query(`
             SELECT 
@@ -76,8 +77,7 @@ export const convertUserTable = async (mysqlConn: any, mongoClient: any, rolenam
                     companyDetails = await addCompaniesToEmployer(user, mysqlConn, db);
                 }
 
-                const licenceData = await assignDefaultLicence(user.user_id, db);
-                const countProfilePercentage = await migrateProfilePercentage(user, db);
+                // const licenceData = await assignDefaultLicence(user.user_id, db);
 
                 console.info(`Processing user: ${user.name} (Email: ${user.email})`);
 
@@ -117,7 +117,7 @@ export const convertUserTable = async (mysqlConn: any, mongoClient: any, rolenam
                     offNotification: false,
                     canChangePass: true,
                     expSnapshot: [],
-                    licenceId: licenceData?.licenceId || null,
+                    licenceId: null,
                     purchasedPlanId: null,
                     unsubscribedJobId: [],
                     approvalStatus: miscSetting && !!(miscSetting.candidateAutoApprove) && !miscSetting.candidateAutoApprove ? 1 : 2,
@@ -127,7 +127,7 @@ export const convertUserTable = async (mysqlConn: any, mongoClient: any, rolenam
                     jobs: {
                         appliedJobCount: 0,
                         totalAppliedJobs: 0,
-                        jobApplicationLimit: licenceData?.jobApplicationLimit || 0
+                        jobApplicationLimit: 0
                     },
                     qualifications: [],
                     resumeFileId: "",
@@ -139,8 +139,8 @@ export const convertUserTable = async (mysqlConn: any, mongoClient: any, rolenam
                     domain: [],
                     skillIds: [],
                     ind: [],
-                    profileCompleted: countProfilePercentage.percentage || 10,
-                    percentObj: countProfilePercentage.percentObj || {
+                    profileCompleted: 10,
+                    percentObj: {
                         basicDetails: 1,
                         personalDetails: 0,
                         industryDetails: 0,
@@ -183,17 +183,18 @@ export const convertUserTable = async (mysqlConn: any, mongoClient: any, rolenam
             if (bulkOps.length > 0) {
                 await db.collection("user").bulkWrite(bulkOps);
             }
-            await updateCompanyWithUserDetails(mysqlConn, bulkOperations, db);
+            await updateCompanyWithUserDetails(mysqlConn, bulkOperations, db, roleCode[rolename]);
         }
-        console.info(`Successfully migrated ${usersFromMySQL.length} users to MongoDB`);
+        console.info(`Successfully migrated ${usersFromMySQL.length} users to MongoDB ✅`);
     } catch (error) {
         console.error("Error - convertUserTable", error);
         throw error;
     }
 }
 
-export const convertCountryTable = async (mysqlConn: any, mongoClient: any) => {
+export const convertCountryTable = async (mysqlPool: any, mongoClient: any) => {
     try {
+        const mysqlConn = await mysqlPool.getConnection();
         const db = mongoClient.db(database);
         const [countries] = await mysqlConn.query(`
             SELECT id, name, status, created_at, updated_at
@@ -231,15 +232,16 @@ export const convertCountryTable = async (mysqlConn: any, mongoClient: any) => {
         if (bulkOps.length > 0) {
             await db.collection("country").bulkWrite(bulkOps);
         }
-        console.info(`Successfully migrated ${countriesToAdd.length} country to MongoDB`);
+        console.info(`Successfully migrated ${countriesToAdd.length} country to MongoDB ✅`);
     } catch (error) {
         console.error("Error - convertCountryTable", error);
         throw error;
     }
 }
 
-export const convertCategoryTable = async (mysqlConn: any, mongoClient: any) => {
+export const convertCategoryTable = async (mysqlPool: any, mongoClient: any) => {
     try {
+        const mysqlConn = await mysqlPool.getConnection();
         const db = mongoClient.db(database);
         const [categoriesFromMySQL] = await mysqlConn.query('SELECT * FROM categories');
 
@@ -275,15 +277,16 @@ export const convertCategoryTable = async (mysqlConn: any, mongoClient: any) => 
             await db.collection("category").bulkWrite(bulkOperations);
         }
 
-        console.info(`Successfully migrated ${categoriesFromMySQL.length} Category to MongoDB`);
+        console.info(`Successfully migrated ${categoriesFromMySQL.length} Category to MongoDB ✅`);
     } catch (error) {
         console.error("Error - convertCategoryTable", error);
         throw error;
     }
 };
 
-export const convertEducationTable = async (mysqlConn: any, mongoClient: any) => {
+export const convertEducationTable = async (mysqlPool: any, mongoClient: any) => {
     try {
+        const mysqlConn = await mysqlPool.getConnection();
         const db = mongoClient.db(database);
         const [educationRecords] = await mysqlConn.query(`
             SELECT 
@@ -376,7 +379,7 @@ export const convertEducationTable = async (mysqlConn: any, mongoClient: any) =>
             await db.collection("educations").bulkWrite(bulkOps);
         }
         await updateUserQualificationsWithDetails(bulkOperations, db)
-        console.info(`Successfully migrated ${bulkOps.length} Education to MongoDB`);
+        console.info(`Successfully migrated ${bulkOps.length} Education to MongoDB ✅`);
 
     } catch (error) {
         console.error("Error - convertEducationTable", error);
@@ -384,8 +387,9 @@ export const convertEducationTable = async (mysqlConn: any, mongoClient: any) =>
     }
 };
 
-export const convertExperienceTable = async (mysqlConn: any, mongoClient: any) => {
+export const convertExperienceTable = async (mysqlPool: any, mongoClient: any) => {
     try {
+        const mysqlConn = await mysqlPool.getConnection();
         const db = mongoClient.db(database);
         const [experiencesRecords] = await mysqlConn.query(`
             SELECT we.*, p.* 
@@ -437,7 +441,7 @@ export const convertExperienceTable = async (mysqlConn: any, mongoClient: any) =
             await db.collection("experiences").bulkWrite(bulkOps);
         }
         await updateUserExperienceWithDetails(bulkOperations, db)
-        console.info(`Successfully migrated ${bulkOps.length} Experiences to MongoDB`);
+        console.info(`Successfully migrated ${bulkOps.length} Experiences to MongoDB ✅`);
 
     } catch (error) {
         console.error("Error - convertExperienceTable", error);
@@ -445,8 +449,9 @@ export const convertExperienceTable = async (mysqlConn: any, mongoClient: any) =
     }
 };
 
-export const convertResumeTable = async (mysqlConn: any, mongoClient: any) => {
+export const convertResumeTable = async (mysqlPool: any, mongoClient: any) => {
     try {
+        const mysqlConn = await mysqlPool.getConnection();
         const db = mongoClient.db(database);
         const [resumesRecords] = await mysqlConn.query(`
             SELECT r.*, p.email 
@@ -467,62 +472,70 @@ export const convertResumeTable = async (mysqlConn: any, mongoClient: any) => {
             }
             return 'application/octet-stream';
         };
-        const resumeToInsert = await Promise.all(resumesRecords.map(async (resume: any) => {
-            if (!resume?.email) return;
-            if (process.env.MAKE_IT_YOPMAIL === 'true') {
-                resume.email = makeItYopmail(resume.email)
-            }
-            const user = await db.collection("user").findOne({ email: resume.email });
-            if (!user) return;
-            resume.person_attributes = resume.person_attributes ? JSON.parse(resume.person_attributes) : null;
-            const type = resume?.cv_path ? getMimeTypeFromFileName(resume.cv_path) : null;
 
-            console.info(`Processing resume: ${resume.title}`);
 
-            return {
-                importId: "DEV-45912",
-                userId: user?._id || undefined,
-                nm: resume.title,
-                oriNm: resume.name || resume.title,
-                type: type,
-                exten: resume?.cv_path ? resume.cv_path.split('.').pop() : null,
-                uri: resume.cv_path,
-                mimeType: type,
-                size: resume.person_attributes ? resume.person_attributes?.size : 0,
-                sts: resume.person_attributes ? resume.person_attributes?.sts : 2,
-                dimensions: resume.person_attributes ? resume.person_attributes?.dimensions : {},
-                createdAt: resume.created_at,
-                updatedAt: resume.updated_at,
-            };
-        }));
-        const bulkOperations = resumeToInsert.filter((user): user is NonNullable<typeof user> => user !== null && user !== undefined);
-        const bulkOps = bulkOperations.map(bulkOp => {
-            return {
-                updateOne: {
-                    filter: {
-                        importId: "DEV-45912",
-                        userId: bulkOp.userId,
-                        nm: bulkOp.nm,
-                    },
-                    update: { $set: bulkOp },
-                    upsert: true,
+        const chunkSize = Number(process.env.CHUNK);
+        const resumesChunks = _.chunk(resumesRecords, chunkSize);
+        for (const chunks of resumesChunks) {
+            const resumeToInsert = await Promise.all(chunks.map(async (resume: any) => {
+                if (!resume?.email) return;
+                if (process.env.MAKE_IT_YOPMAIL === 'true') {
+                    resume.email = makeItYopmail(resume.email)
                 }
-            }
-        });
+                const user = await db.collection("user").findOne({ email: resume.email });
+                if (!user) return;
+                resume.person_attributes = resume.person_attributes ? JSON.parse(resume.person_attributes) : null;
+                const type = resume?.cv_path ? getMimeTypeFromFileName(resume.cv_path) : null;
 
-        if (bulkOps.length > 0) {
-            await db.collection("file").bulkWrite(bulkOps);
+                console.info(`Processing resume: ${resume.title}`);
+
+                return {
+                    importId: "DEV-45912",
+                    userId: user?._id || undefined,
+                    nm: resume.title,
+                    oriNm: resume.name || resume.title,
+                    type: type,
+                    exten: resume?.cv_path ? resume.cv_path.split('.').pop() : null,
+                    uri: `telegrafi/${resume.cv_path}`,
+                    mimeType: type,
+                    size: resume.person_attributes ? resume.person_attributes?.size : 0,
+                    sts: resume.person_attributes ? resume.person_attributes?.sts : 2,
+                    dimensions: resume.person_attributes ? resume.person_attributes?.dimensions : {},
+                    createdAt: resume.created_at,
+                    updatedAt: resume.updated_at,
+                };
+            }));
+            const bulkOperations = resumeToInsert.filter((user): user is NonNullable<typeof user> => user !== null && user !== undefined);
+            const bulkOps = bulkOperations.map(bulkOp => {
+                return {
+                    updateOne: {
+                        filter: {
+                            importId: "DEV-45912",
+                            userId: bulkOp.userId,
+                            nm: bulkOp.nm,
+                        },
+                        update: { $set: bulkOp },
+                        upsert: true,
+                    }
+                }
+            });
+
+            if (bulkOps.length > 0) {
+                await db.collection("file").bulkWrite(bulkOps);
+            }
+            await updateUserResumeWithDetails(bulkOperations, db);
         }
-        await updateUserResumeWithDetails(bulkOperations, db);
-        console.info(`Successfully migrated ${bulkOps.length} Resumes to MongoDB`);
+
+        console.info(`Successfully migrated ${resumesRecords.length} Resumes to MongoDB ✅`);
     } catch (error) {
         console.error("Error - convertResumeTable", error);
         throw error;
     }
 };
 
-export const convertAttachmentTable = async (mysqlConn: any, mongoClient: any) => {
+export const convertAttachmentTable = async (mysqlPool: any, mongoClient: any) => {
     try {
+        const mysqlConn = await mysqlPool.getConnection();
         const db = mongoClient.db(database);
         const [attachmentsRecords] = await mysqlConn.query(`
                 SELECT atc.*, p.email AS userEmail  
@@ -535,7 +548,8 @@ export const convertAttachmentTable = async (mysqlConn: any, mongoClient: any) =
             if (process.env.MAKE_IT_YOPMAIL === 'true') {
                 attach.userEmail = makeItYopmail(attach.userEmail)
             }
-            const user = await db.collection("user").findOne({ email: attach.userEmail });
+            const user = await db.collection("user").findOne({ email: { $in: [attach.userEmail, attach.personEmail] } });
+            if (!user) return null;
             const file = await db.collection("file").findOne({ userId: user._id, nm: attach.name });
             if (file) return null;
             console.info(`Processing resume: ${attach.name}`);
@@ -547,7 +561,7 @@ export const convertAttachmentTable = async (mysqlConn: any, mongoClient: any) =
                 oriNm: attach.name,
                 type: attach.mime_type,
                 exten: attach.path.split('.').pop(),
-                uri: attach.path,
+                uri: `telegrafi/${attach.path}`,
                 sts: 2,
                 mimeType: attach.mime_type,
                 createdAt: attach.created_at,
@@ -573,15 +587,16 @@ export const convertAttachmentTable = async (mysqlConn: any, mongoClient: any) =
         if (bulkOps.length > 0) {
             await db.collection("file").bulkWrite(bulkOps);
         }
-        console.info(`Successfully migrated ${bulkOps.length} Attachments to MongoDB`);
+        console.info(`Successfully migrated ${bulkOps.length} Attachments to MongoDB ✅`);
     } catch (error) {
         console.error("Error - convertAttachmentTable", error);
         throw error;
     }
 };
 
-export const convertCompanyTable = async (mysqlConn: any, mongoClient: any) => {
+export const convertCompanyTable = async (mysqlPool: any, mongoClient: any) => {
     try {
+        const mysqlConn = await mysqlPool.getConnection();
         const db = mongoClient.db(database);
         const [companiesRecords] = await mysqlConn.query(`SELECT
                 cm.id AS companyId,
@@ -620,7 +635,7 @@ export const convertCompanyTable = async (mysqlConn: any, mongoClient: any) => {
             LEFT JOIN attachments att ON cm.logo_id = att.id;
         `);
 
-        const bulkOperations = await Promise.all(companiesRecords.map(async (company: any) => {
+        const companyToInsert = await Promise.all(companiesRecords.map(async (company: any) => {
             if (!company?.userEmail || !company?.employerEmail) return null;
             if (process.env.MAKE_IT_YOPMAIL === 'true') {
                 company.userEmail = makeItYopmail(company.userEmail)
@@ -634,7 +649,7 @@ export const convertCompanyTable = async (mysqlConn: any, mongoClient: any) => {
                 slug: company.slug,
                 userIds: { $in: user._id }
             });
-            if (findCompany) return;
+            if (findCompany) return null;
 
             const logoFile = user && await db.collection("file").findOne({ userId: user._id, nm: company.logoURL, importId: "DEV-45912" });
             const parsedAddress = parseAddress(company.address);
@@ -674,6 +689,7 @@ export const convertCompanyTable = async (mysqlConn: any, mongoClient: any) => {
             };
         }));
 
+        const bulkOperations = companyToInsert.filter((user): user is NonNullable<typeof user> => user !== null && user !== undefined);
         const bulkOps = bulkOperations.map(bulkOp => {
             return {
                 updateOne: {
@@ -692,15 +708,16 @@ export const convertCompanyTable = async (mysqlConn: any, mongoClient: any) => {
             await db.collection("company").bulkWrite(bulkOps);
         }
         // await updateUserWithCompanyDetails(bulkOperations, db);
-        console.info(`Successfully migrated ${bulkOps.length} Companies to MongoDB`);
+        console.info(`Successfully migrated ${bulkOps.length} Companies to MongoDB ✅`);
     } catch (error) {
         console.error("Error - convertCompanyTable", error);
         throw error;
     }
 };
 
-export const convertCityTable = async (mysqlConn: any, mongoClient: any) => {
+export const convertCityTable = async (mysqlPool: any, mongoClient: any) => {
     try {
+        const mysqlConn = await mysqlPool.getConnection();
         const db = mongoClient.db(database);
         const [cities] = await mysqlConn.query(`
             SELECT 
@@ -742,15 +759,16 @@ export const convertCityTable = async (mysqlConn: any, mongoClient: any) => {
         if (bulkOps.length > 0) {
             await db.collection("city").bulkWrite(bulkOps);
         }
-        console.info(`Successfully migrated ${bulkOps.length} Cities to MongoDB`);
+        console.info(`Successfully migrated ${bulkOps.length} Cities to MongoDB ✅`);
     } catch (error) {
         console.error("Error - convertCityTable", error);
         throw error;
     }
 };
 
-export const convertJobTable = async (mysqlConn: any, mongoClient: any) => {
+export const convertJobTable = async (mysqlPool: any, mongoClient: any) => {
     try {
+        const mysqlConn = await mysqlPool.getConnection();
         const db = mongoClient.db(database);
         const [jobsRecords] = await mysqlConn.query(`
             SELECT 
@@ -880,15 +898,16 @@ export const convertJobTable = async (mysqlConn: any, mongoClient: any) => {
                 await db.collection("jobs").bulkWrite(bulkOps);
             }
         };
-        console.info(`Successfully migrated ${jobsRecords.length} Jobs to MongoDB`);
+        console.info(`Successfully migrated ${jobsRecords.length} Jobs to MongoDB ✅`);
     } catch (error) {
         console.error("Error - convertJobTable", error);
         throw error;
     }
 };
 
-export const convertUserJobsTable = async (mysqlConn: any, mongoClient: any) => {
+export const convertUserJobsTable = async (mysqlPool: any, mongoClient: any) => {
     try {
+        const mysqlConn = await mysqlPool.getConnection();
         const db = mongoClient.db(database);
         const [appliesRecords] = await mysqlConn.query(`
             SELECT 
@@ -965,15 +984,16 @@ export const convertUserJobsTable = async (mysqlConn: any, mongoClient: any) => 
             await db.collection("userjobs").bulkWrite(bulkOps);
         }
         await updateUserAndJobsDetails(bulkOperations, db);
-        console.info(`Successfully migrated ${bulkOps.length} UserJobs to MongoDB`);
+        console.info(`Successfully migrated ${bulkOps.length} UserJobs to MongoDB ✅`);
     } catch (error) {
         console.error("Error - convertUserJobsTable", error);
         throw error;
     }
 };
 
-export const convertJobsTrackTable = async (mysqlConn: any, mongoClient: any) => {
+export const convertJobsTrackTable = async (mysqlPool: any, mongoClient: any) => {
     try {
+        const mysqlConn = await mysqlPool.getConnection();
         const db = mongoClient.db(database);
         const [bookmarksRecords] = await mysqlConn.query(`
             SELECT
@@ -1031,15 +1051,16 @@ export const convertJobsTrackTable = async (mysqlConn: any, mongoClient: any) =>
         if (bulkOps.length > 0) {
             await db.collection("jobsTracks").bulkWrite(bulkOps);
         }
-        console.info(`Successfully migrated ${bulkOps.length} JobsTrack to MongoDB`);
+        console.info(`Successfully migrated ${bulkOps.length} JobsTrack to MongoDB ✅`);
     } catch (error) {
         console.error("Error - convertJobsTrackTable", error);
         throw error;
     }
 };
 
-export const convertCertificateTable = async (mysqlConn: any, mongoClient: any) => {
+export const convertCertificateTable = async (mysqlPool: any, mongoClient: any) => {
     try {
+        const mysqlConn = await mysqlPool.getConnection();
         const db = mongoClient.db(database);
         const [certificatesRecords] = await mysqlConn.query(`
             SELECT
@@ -1095,15 +1116,16 @@ export const convertCertificateTable = async (mysqlConn: any, mongoClient: any) 
         if (bulkOps.length > 0) {
             await db.collection("certificates").bulkWrite(bulkOps);
         }
-        console.info(`Successfully migrated ${bulkOps.length} Certificates to MongoDB`);
+        console.info(`Successfully migrated ${bulkOps.length} Certificates to MongoDB ✅`);
     } catch (error) {
         console.error("Error - convertCertificateTable", error);
         throw error;
     }
 };
 
-export const calculatePercentageOfUsers = async (mysqlConn: any, mongoClient: any) => {
+export const calculatePercentageOfUsers = async (mysqlPool: any, mongoClient: any) => {
     try {
+        const mysqlConn = await mysqlPool.getConnection();
         const db = mongoClient.db(database);
         const userList = await db.collection("user").find({ importId: "DEV-45912" }).toArray();
         if (userList.length === 0) return null;
@@ -1126,10 +1148,39 @@ export const calculatePercentageOfUsers = async (mysqlConn: any, mongoClient: an
             await db.collection("user").findOneAndUpdate({ _id: user._id }, { $set: { profileCompleted: result.profileCompleted, percentObj: result.percentObj } }, { new: true })
             console.info(`Calculating percentage for user: ${user.name} (${user.email})`);
         }
-        console.info(`Updated ${userList.length} user profiles with percentage in MongoDB`);
+        console.info(`Updated ${userList.length} user profiles with percentage in MongoDB ✅`);
         return true;
     } catch (error) {
         console.error("Error - calculatePercentageOfUsers", error);
+        throw error;
+    }
+};
+
+export const migrateUsersToCompany = async (mongoClient: any) => {
+    try {
+        const db = mongoClient.db(database);
+        const query = { $exists: true, $ne: null };
+        const users = await db.collection("user").find({ compId: query, compNm: query }).toArray();
+
+        for (const user of users) {
+            const { _id: userId, compId, compNm } = user;
+
+            const company = await db.collection("company").findOne({ _id: compId, compNm });
+            if (company) {
+                if (!company.userIds.includes(userId)) {
+                    console.info(`Adding user ${userId} to company ${compNm} (${compId}).`);
+                    await db.collection("company").updateOne({ _id: compId }, { $push: { userIds: userId } });
+                } else {
+                    console.info(`User ${userId} is already in company ${compNm} (${compId}).`);
+                }
+            } else {
+                console.warn(`Company ${compNm} (${compId}) not found for user ${userId}.`);
+            }
+        }
+
+        console.info("Migration user to company completed. ✅");
+    } catch (error) {
+        console.error("Error - migrateUsersToCompany:", error);
         throw error;
     }
 };

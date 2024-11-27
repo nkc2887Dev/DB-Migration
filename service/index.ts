@@ -1,22 +1,28 @@
-import { convertUserTable, convertJobTable, convertCountryTable, convertCategoryTable, convertEducationTable, convertExperienceTable, convertResumeTable, convertCompanyTable, convertAttachmentTable, convertCityTable, convertUserJobsTable, convertJobsTrackTable, convertCertificateTable, calculatePercentageOfUsers } from "./convertTable"
+import { convertUserTable, convertJobTable, convertCountryTable, convertCategoryTable, convertEducationTable, convertExperienceTable, convertResumeTable, convertCompanyTable, convertAttachmentTable, convertCityTable, convertUserJobsTable, convertJobsTrackTable, convertCertificateTable, calculatePercentageOfUsers, migrateUsersToCompany } from "./convertTable"
 
-export const main = async (mysqlConn: any, mongoClient: any) => {
+export const main = async (mysqlPool: any, mongoClient: any) => {
     try {
-        await convertUserTable(mysqlConn, mongoClient, 'punekerkues');
-        await convertUserTable(mysqlConn, mongoClient, 'punedhenes');
-        await convertCompanyTable(mysqlConn, mongoClient);
-        await convertAttachmentTable(mysqlConn, mongoClient);
-        await convertResumeTable(mysqlConn, mongoClient);
-        await convertEducationTable(mysqlConn, mongoClient);
-        await convertExperienceTable(mysqlConn, mongoClient);
-        await convertCertificateTable(mysqlConn, mongoClient);
-        await convertCountryTable(mysqlConn, mongoClient);
-        await convertCityTable(mysqlConn, mongoClient);
-        await convertCategoryTable(mysqlConn, mongoClient);
-        await convertJobTable(mysqlConn, mongoClient);
-        await convertUserJobsTable(mysqlConn, mongoClient);
-        await convertJobsTrackTable(mysqlConn, mongoClient);
-        await calculatePercentageOfUsers(mysqlConn, mongoClient);
+        const tasks: any[] = [
+            await convertUserTable(mysqlPool, mongoClient, 'punekerkues'),
+            await convertUserTable(mysqlPool, mongoClient, 'punedhenes'),
+            await convertCompanyTable(mysqlPool, mongoClient),
+            await convertAttachmentTable(mysqlPool, mongoClient),
+            await convertResumeTable(mysqlPool, mongoClient),
+            await convertEducationTable(mysqlPool, mongoClient),
+            await convertExperienceTable(mysqlPool, mongoClient),
+            await convertCertificateTable(mysqlPool, mongoClient),
+            await convertCountryTable(mysqlPool, mongoClient),
+            await convertCityTable(mysqlPool, mongoClient),
+            await convertCategoryTable(mysqlPool, mongoClient),
+            await convertJobTable(mysqlPool, mongoClient),
+            await convertUserJobsTable(mysqlPool, mongoClient),
+            await convertJobsTrackTable(mysqlPool, mongoClient),
+            await calculatePercentageOfUsers(mysqlPool, mongoClient),
+            await migrateUsersToCompany(mongoClient),
+        ]
+
+        await Promise.all(tasks);
+        console.info('All conversions completed successfully. 🚀');
     } catch (error) {
         console.error('Error during table conversion or calculation:', error);
         throw error;
