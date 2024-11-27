@@ -288,26 +288,27 @@ export const updateCompanyWithUserDetails = async (mysqlConn: any, bulkOperation
             
 
             const attach = attachmentsRecords?.[0] || null;
-            if (!attach && attachmentsRecords.length === 0) return null;
-            await db.collection("file").findOneAndUpdate({ userId: userEmail._id, nm: attach.name, importId: "DEV-45912" }, {
-                $set: {
-                    importId: "DEV-45912",
-                    userId: userEmail?._id,
-                    nm: attach.name,
-                    oriNm: attach.name,
-                    type: attach.mime_type,
-                    exten: attach.path.split('.').pop(),
-                    uri: `telegrafi/${attach.path}`,
-                    sts: 2,
-                    mimeType: attach.mime_type,
-                    createdAt: attach.created_at,
-                    updatedAt: attach.updated_at,
-                }
-            }, { new: true, upsert: true });
-
-            const logoFile = await db.collection("file").findOne({ userId: userEmail._id, nm: attach.name, importId: "DEV-45912" });
-            await db.collection("company").findOneAndUpdate({ _id: user.compId }, { $set: { userIds: [userEmail._id], ...(logoFile ? { logoId: logoFile._id } : {}) } }, { new: true });
-            console.info(`Processing update company with user details: ${user.email}`);
+            let logoFile = null;
+            if (attach && attachmentsRecords.length > 0) {
+                await db.collection("file").findOneAndUpdate({ userId: userEmail._id, nm: attach.name, importId: "DEV-45912" }, {
+                    $set: {
+                        importId: "DEV-45912",
+                        userId: userEmail?._id,
+                        nm: attach.name,
+                        oriNm: attach.name,
+                        type: attach.mime_type,
+                        exten: attach.path.split('.').pop(),
+                        uri: `telegrafi/${attach.path}`,
+                        sts: 2,
+                        mimeType: attach.mime_type,
+                        createdAt: attach.created_at,
+                        updatedAt: attach.updated_at,
+                    }
+                }, { new: true, upsert: true });
+                logoFile = await db.collection("file").findOne({ userId: userEmail._id, nm: attach.name, importId: "DEV-45912" });
+            }
+            user?.compId && await db.collection("company").findOneAndUpdate({ _id: user.compId }, { $set: { userIds: [userEmail._id], ...(logoFile ? { logoId: logoFile._id } : {}) } }, { new: true });
+            console.info(`Processing update company/file/order with user details: ${user.email}`);
             return true;
         }));
     } catch (error) {
