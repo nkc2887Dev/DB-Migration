@@ -10,6 +10,15 @@ const ACTIONS = {
     ACCOMPLISHMENTS: "accomplishments",
 };
 
+const USER_TABS_HEADER = {
+    skillsHeader: "Skills",
+    experHeader: "Work Experiences",
+    eduHeader: "Educations",
+    certiHeader: "Certifications",
+    orbitCertiHeader: "Orbit Certifications",
+    projectHeader: "Projects"
+}
+
 const idGenerator = async (type: string, db: any) => {
     let series = await db.collection("seriesGenerator").findOneAndUpdate(
         { type: type },
@@ -246,7 +255,7 @@ export const updateUserResumeWithDetails = async (resumesRecords: any, db: any) 
                 prevUsed: false,
                 createdAt: resume.createdAt,
             }));
-            await db.collection("user").findOneAndUpdate({ _id: resume.userId }, { $set: { resumes, resumeHeaders: process.env.USER_TABS_HEADER, resumeFileId: resumesFromFile[0]._id } }, { new: true })
+            await db.collection("user").findOneAndUpdate({ _id: resume.userId }, { $set: { resumes, resumeHeaders: USER_TABS_HEADER, resumeFileId: resumesFromFile[0]._id } }, { new: true })
             console.info(`Processing update user with resume details: ${resume.oriNm}`);
         }));
 
@@ -274,7 +283,7 @@ export const updateUserWithCompanyDetails = async (companyRecords: any, db: any)
 
 export const updateCompanyWithUserDetails = async (mysqlConn: any, bulkOperations: any, db: any, roleCode: any) => {
     try {
-        return await Promise.all(bulkOperations.map(async (user: any) => {
+        await Promise.all(bulkOperations.map(async (user: any) => {
             if (!user?.compId && !user.email) return null;
             const userEmail = await db.collection("user").findOne({ email: user.email });
             userEmail && await assignDefaultLicence(userEmail._id, db, roleCode);
@@ -311,6 +320,7 @@ export const updateCompanyWithUserDetails = async (mysqlConn: any, bulkOperation
             console.info(`Processing update company/file/order with user details: ${user.email}`);
             return true;
         }));
+        return true;
     } catch (error) {
         console.error("Error - updateCompanyWithUserDetails", error);
         throw error;
