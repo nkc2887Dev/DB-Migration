@@ -312,77 +312,82 @@ export const convertEducationTable = async (mysqlPool: any, mongoClient: any) =>
             people p ON e.person_id = p.id;
           `);
 
-        const educationToInsert = await Promise.all(educationRecords.map(async (education: any) => {
-            if (!education?.email) return null;
-            if (process.env.MAKE_IT_YOPMAIL === 'true') {
-                education.email = makeItYopmail(education.email)
-            }
-            const user = await db.collection("user").findOne({ email: education.email });
-            if (!user) return null;
+        const chunkSize = Number(process.env.CHUNK);
+        const educationChunks = _.chunk(educationRecords, chunkSize);
 
-            const instiNmCache: any = education?.institution_name ? await findOrCreateMaster(education.institution_name, "INSTITUTE_UNIVERSITY", db) : null;
-            const qualificationNmCache: any = education?.qualification ? await findOrCreateMaster(education.qualification, "EMPLOYEE_QUALIFICATION", db) : null;
-            const fieldOfStuNmCache: any = education?.field_of_study ? await findOrCreateMaster(education.field_of_study, "FIELD_OF_STUDY", db) : null;
-
-            console.info(`Processing education: ${education.qualification}`);
-
-            return {
-                importId: "DEV-45912",
-                userId: user?._id,
-                ...(instiNmCache && {
-                    institutionId: instiNmCache._id,
-                    instiNm: {
-                        en: education.institution_name,
-                        id: education.institution_name,
-                    },
-                }),
-                ...(qualificationNmCache && {
-                    qualificationId: qualificationNmCache._id,
-                    qualificationNm: {
-                        en: education.qualification,
-                        id: education.qualification,
-                    },
-                }),
-                ...(fieldOfStuNmCache && {
-                    fieldOfStuId: fieldOfStuNmCache._id,
-                    fieldOfStuNm: {
-                        en: education.field_of_study,
-                        id: education.field_of_study,
-                    },
-                }),
-                date: education.created_at,
-                from: education.period_start,
-                to: education.period_end,
-                stillActive: !!education.still_active,
-                createdAt: new Date(education.created_at),
-                updatedAt: new Date(education.updated_at),
-            };
-        }));
-
-        const bulkOperations = educationToInsert.filter((user): user is NonNullable<typeof user> => user !== null && user !== undefined);
-        const bulkOps = bulkOperations.map(bulkOp => {
-            return {
-                updateOne: {
-                    filter: {
-                        importId: "DEV-45912",
-                        userId: bulkOp.userId,
-                        ...(bulkOp?.institutionId && { institutionId: bulkOp.institutionId }),
-                        ...(bulkOp?.qualificationId && { qualificationId: bulkOp.qualificationId }),
-                        ...(bulkOp?.fieldOfStuId && { fieldOfStuId: bulkOp.fieldOfStuId }),
-                        from: bulkOp.from,
-                        to: bulkOp.to
-                    },
-                    update: { $set: bulkOp },
-                    upsert: true,
+        for (const chunk of educationChunks) {
+            const educationToInsert = await Promise.all(chunk.map(async (education: any) => {
+                if (!education?.email) return null;
+                if (process.env.MAKE_IT_YOPMAIL === 'true') {
+                    education.email = makeItYopmail(education.email)
                 }
-            }
-        });
+                const user = await db.collection("user").findOne({ email: education.email });
+                if (!user) return null;
 
-        if (bulkOps.length > 0) {
-            await db.collection("educations").bulkWrite(bulkOps);
+                const instiNmCache: any = education?.institution_name ? await findOrCreateMaster(education.institution_name, "INSTITUTE_UNIVERSITY", db) : null;
+                const qualificationNmCache: any = education?.qualification ? await findOrCreateMaster(education.qualification, "EMPLOYEE_QUALIFICATION", db) : null;
+                const fieldOfStuNmCache: any = education?.field_of_study ? await findOrCreateMaster(education.field_of_study, "FIELD_OF_STUDY", db) : null;
+
+                console.info(`Processing education: ${education.qualification}`);
+
+                return {
+                    importId: "DEV-45912",
+                    userId: user?._id,
+                    ...(instiNmCache && {
+                        institutionId: instiNmCache._id,
+                        instiNm: {
+                            en: education.institution_name,
+                            id: education.institution_name,
+                        },
+                    }),
+                    ...(qualificationNmCache && {
+                        qualificationId: qualificationNmCache._id,
+                        qualificationNm: {
+                            en: education.qualification,
+                            id: education.qualification,
+                        },
+                    }),
+                    ...(fieldOfStuNmCache && {
+                        fieldOfStuId: fieldOfStuNmCache._id,
+                        fieldOfStuNm: {
+                            en: education.field_of_study,
+                            id: education.field_of_study,
+                        },
+                    }),
+                    date: education.created_at,
+                    from: education.period_start,
+                    to: education.period_end,
+                    stillActive: !!education.still_active,
+                    createdAt: new Date(education.created_at),
+                    updatedAt: new Date(education.updated_at),
+                };
+            }));
+
+            const bulkOperations = educationToInsert.filter((user): user is NonNullable<typeof user> => user !== null && user !== undefined);
+            const bulkOps = bulkOperations.map(bulkOp => {
+                return {
+                    updateOne: {
+                        filter: {
+                            importId: "DEV-45912",
+                            userId: bulkOp.userId,
+                            ...(bulkOp?.institutionId && { institutionId: bulkOp.institutionId }),
+                            ...(bulkOp?.qualificationId && { qualificationId: bulkOp.qualificationId }),
+                            ...(bulkOp?.fieldOfStuId && { fieldOfStuId: bulkOp.fieldOfStuId }),
+                            from: bulkOp.from,
+                            to: bulkOp.to
+                        },
+                        update: { $set: bulkOp },
+                        upsert: true,
+                    }
+                }
+            });
+
+            if (bulkOps.length > 0) {
+                await db.collection("educations").bulkWrite(bulkOps);
+            }
+            await updateUserQualificationsWithDetails(bulkOperations, db)
         }
-        await updateUserQualificationsWithDetails(bulkOperations, db)
-        console.info(`Successfully migrated ${bulkOps.length} Education to MongoDB ✅`);
+        console.info(`Successfully migrated ${educationRecords.length} Education to MongoDB ✅`);
         return true;
     } catch (error) {
         console.error("Error - convertEducationTable", error);
@@ -400,51 +405,56 @@ export const convertExperienceTable = async (mysqlPool: any, mongoClient: any) =
             JOIN people p ON we.person_id = p.id
             `);
 
-        const experienceToInsert = await Promise.all(experiencesRecords.map(async (experience: any) => {
-            if (!experience?.email) return null;
-            if (process.env.MAKE_IT_YOPMAIL === 'true') {
-                experience.email = makeItYopmail(experience.email);
-            }
-            const user = await db.collection("user").findOne({ email: experience.email });
-            if (!user) return null;
-            console.info(`Processing experience: ${experience.title}`);
+        const chunkSize = Number(process.env.CHUNK);
+        const experienceChunks = _.chunk(experiencesRecords, chunkSize);
 
-            return {
-                importId: "DEV-45912",
-                userId: user?._id,
-                title: experience.title,
-                comNm: experience.company_name,
-                countryNm: experience.location,
-                from: experience.period_start,
-                to: experience.period_end,
-                stillActive: !!experience.is_present,
-                desc: experience.responsibilities,
-                createdAt: experience.created_at,
-                updatedAt: experience.updated_at,
-            };
-        }));
-
-        const bulkOperations = experienceToInsert.filter((user): user is NonNullable<typeof user> => user !== null && user !== undefined);
-        const bulkOps = bulkOperations.map(bulkOp => {
-            return {
-                updateOne: {
-                    filter: {
-                        importId: "DEV-45912",
-                        userId: bulkOp.userId,
-                        title: bulkOp.title,
-                        comNm: bulkOp.comNm,
-                    },
-                    update: { $set: bulkOp },
-                    upsert: true,
+        for (const chunk of experienceChunks) {
+            const experienceToInsert = await Promise.all(chunk.map(async (experience: any) => {
+                if (!experience?.email) return null;
+                if (process.env.MAKE_IT_YOPMAIL === 'true') {
+                    experience.email = makeItYopmail(experience.email);
                 }
-            }
-        });
+                const user = await db.collection("user").findOne({ email: experience.email });
+                if (!user) return null;
+                console.info(`Processing experience: ${experience.title}`);
 
-        if (bulkOps.length > 0) {
-            await db.collection("experiences").bulkWrite(bulkOps);
+                return {
+                    importId: "DEV-45912",
+                    userId: user?._id,
+                    title: experience.title,
+                    comNm: experience.company_name,
+                    countryNm: experience.location,
+                    from: experience.period_start,
+                    to: experience.period_end,
+                    stillActive: !!experience.is_present,
+                    desc: experience.responsibilities,
+                    createdAt: experience.created_at,
+                    updatedAt: experience.updated_at,
+                };
+            }));
+
+            const bulkOperations = experienceToInsert.filter((user): user is NonNullable<typeof user> => user !== null && user !== undefined);
+            const bulkOps = bulkOperations.map(bulkOp => {
+                return {
+                    updateOne: {
+                        filter: {
+                            importId: "DEV-45912",
+                            userId: bulkOp.userId,
+                            title: bulkOp.title,
+                            comNm: bulkOp.comNm,
+                        },
+                        update: { $set: bulkOp },
+                        upsert: true,
+                    }
+                }
+            });
+
+            if (bulkOps.length > 0) {
+                await db.collection("experiences").bulkWrite(bulkOps);
+            }
+            await updateUserExperienceWithDetails(bulkOperations, db)
         }
-        await updateUserExperienceWithDetails(bulkOperations, db)
-        console.info(`Successfully migrated ${bulkOps.length} Experiences to MongoDB ✅`);
+        console.info(`Successfully migrated ${experiencesRecords.length} Experiences to MongoDB ✅`);
         return true;
     } catch (error) {
         console.error("Error - convertExperienceTable", error);
@@ -479,6 +489,7 @@ export const convertResumeTable = async (mysqlPool: any, mongoClient: any) => {
 
         const chunkSize = Number(process.env.CHUNK);
         const resumesChunks = _.chunk(resumesRecords, chunkSize);
+
         for (const chunks of resumesChunks) {
             const resumeToInsert = await Promise.all(chunks.map(async (resume: any) => {
                 if (!resume?.email) return null;
@@ -547,51 +558,56 @@ export const convertAttachmentTable = async (mysqlPool: any, mongoClient: any) =
                 JOIN users p ON atc.created_by = p.id
         `);
 
-        const fileToInsert = await Promise.all(attachmentsRecords.map(async (attach: any) => {
-            if (!attach?.userEmail) return null;
-            if (process.env.MAKE_IT_YOPMAIL === 'true') {
-                attach.userEmail = makeItYopmail(attach.userEmail)
-            }
-            const user = await db.collection("user").findOne({ email: { $in: [attach.userEmail, attach.personEmail] } });
-            if (!user) return null;
-            const file = await db.collection("file").findOne({ userId: user._id, nm: attach.name });
-            if (file) return null;
-            console.info(`Processing attachment: ${attach.name}`);
+        const chunkSize = Number(process.env.CHUNK);
+        const attachmentChunks = _.chunk(attachmentsRecords, chunkSize);
 
-            return {
-                importId: "DEV-45912",
-                userId: user?._id,
-                nm: attach.name,
-                oriNm: attach.name,
-                type: attach.mime_type,
-                exten: attach.path.split('.').pop(),
-                uri: `telegrafi/${attach.path}`,
-                sts: 2,
-                mimeType: attach.mime_type,
-                createdAt: attach.created_at,
-                updatedAt: attach.updated_at,
-            };
-        }));
-
-        const bulkOperations = fileToInsert.filter((user): user is NonNullable<typeof user> => user !== null && user !== undefined);
-        const bulkOps = bulkOperations.map(bulkOp => {
-            return {
-                updateOne: {
-                    filter: {
-                        importId: "DEV-45912",
-                        userId: bulkOp.userId,
-                        nm: bulkOp.nm,
-                    },
-                    update: { $set: bulkOp },
-                    upsert: true,
+        for (const chunks of attachmentChunks) {
+            const fileToInsert = await Promise.all(chunks.map(async (attach: any) => {
+                if (!attach?.userEmail) return null;
+                if (process.env.MAKE_IT_YOPMAIL === 'true') {
+                    attach.userEmail = makeItYopmail(attach.userEmail)
                 }
-            }
-        });
+                const user = await db.collection("user").findOne({ email: { $in: [attach.userEmail, attach.personEmail] } });
+                if (!user) return null;
+                const file = await db.collection("file").findOne({ userId: user._id, nm: attach.name });
+                if (file) return null;
+                console.info(`Processing attachment: ${attach.name}`);
 
-        if (bulkOps.length > 0) {
-            await db.collection("file").bulkWrite(bulkOps);
+                return {
+                    importId: "DEV-45912",
+                    userId: user?._id,
+                    nm: attach.name,
+                    oriNm: attach.name,
+                    type: attach.mime_type,
+                    exten: attach.path.split('.').pop(),
+                    uri: `telegrafi/${attach.path}`,
+                    sts: 2,
+                    mimeType: attach.mime_type,
+                    createdAt: attach.created_at,
+                    updatedAt: attach.updated_at,
+                };
+            }));
+
+            const bulkOperations = fileToInsert.filter((user): user is NonNullable<typeof user> => user !== null && user !== undefined);
+            const bulkOps = bulkOperations.map(bulkOp => {
+                return {
+                    updateOne: {
+                        filter: {
+                            importId: "DEV-45912",
+                            userId: bulkOp.userId,
+                            nm: bulkOp.nm,
+                        },
+                        update: { $set: bulkOp },
+                        upsert: true,
+                    }
+                }
+            });
+
+            if (bulkOps.length > 0) {
+                await db.collection("file").bulkWrite(bulkOps);
+            }
         }
-        console.info(`Successfully migrated ${bulkOps.length} Attachments to MongoDB ✅`);
+        console.info(`Successfully migrated ${attachmentChunks.length} Attachments to MongoDB ✅`);
         return true;
     } catch (error) {
         console.error("Error - convertAttachmentTable", error);
@@ -640,80 +656,85 @@ export const convertCompanyTable = async (mysqlPool: any, mongoClient: any) => {
             LEFT JOIN attachments att ON cm.logo_id = att.id;
         `);
 
-        const companyToInsert = await Promise.all(companiesRecords.map(async (company: any) => {
-            if (!company?.userEmail && !company?.employerEmail) return null;
-            if (process.env.MAKE_IT_YOPMAIL === 'true') {
-                company.userEmail = makeItYopmail(company.userEmail)
-                company.employerEmail = makeItYopmail(company.employerEmail)
-            }
+        const chunkSize = Number(process.env.CHUNK);
+        const comapnyChunks = _.chunk(companiesRecords, chunkSize);
 
-            const user = await db.collection("user").findOne({ email: { $in: [company.employerEmail, company.userEmail] } });
-            const findCompany = user && await db.collection("company").findOne({
-                importId: "DEV-45912",
-                compNm: company.name,
-                slug: company.slug,
-                userIds: { $in: Array.isArray(user._id) ? user._id : [user._id] }
-            });
-            if (findCompany) return null;
-
-            const logoFile = user && await db.collection("file").findOne({ userId: user._id, nm: company.logoURL, importId: "DEV-45912" });
-            const parsedAddress = parseAddress(company.address);
-
-            console.info(`Processing company: ${company.name}`);
-
-            return {
-                importId: "DEV-45912",
-                compNm: company.name,
-                slug: company.slug,
-                licenceNo: company.licenceNo || null,
-                userIds: user?._id ? [user?._id] : [],
-                conPer: {
-                    nm: company.nm,
-                    mobileNo: company.phone,
-                    email: company.email,
-                    countryCode: company.countryCode
-                },
-                logoId: logoFile?._id || null,
-                compWebURL: company.compWebURL,
-                compLinkedInURL: company.compLinkedInURL,
-                profilePercent: company.profilePercent || 0,
-                address: {
-                    street: parsedAddress.street,
-                    address1: parsedAddress.address1,
-                    countryNm: parsedAddress.countryNm,
-                    cityNm: parsedAddress.cityNm,
-                    zipCode: parsedAddress.zipCode,
-                },
-                isActive: !!company.isActive,
-                benefits: company.benefits || null,
-                compDomains: company.compDomains || null,
-                createdBy: user?._id || null,
-                isDefault: false,
-                createdAt: company.createdAt,
-                updatedAt: company.updatedAt,
-            };
-        }));
-
-        const bulkOperations = companyToInsert.filter((user): user is NonNullable<typeof user> => user !== null && user !== undefined);
-        const bulkOps = bulkOperations.map(bulkOp => {
-            return {
-                updateOne: {
-                    filter: {
-                        importId: "DEV-45912",
-                        compNm: bulkOp.compNm,
-                        slug: bulkOp.slug,
-                    },
-                    update: { $set: bulkOp },
-                    upsert: true,
+        for (const chunk of comapnyChunks) {
+            const companyToInsert = await Promise.all(chunk.map(async (company: any) => {
+                if (!company?.userEmail && !company?.employerEmail) return null;
+                if (process.env.MAKE_IT_YOPMAIL === 'true') {
+                    company.userEmail = makeItYopmail(company.userEmail)
+                    company.employerEmail = makeItYopmail(company.employerEmail)
                 }
-            }
-        });
 
-        if (bulkOps.length > 0) {
-            await db.collection("company").bulkWrite(bulkOps);
+                const user = await db.collection("user").findOne({ email: { $in: [company.employerEmail, company.userEmail] } });
+                const findCompany = user && await db.collection("company").findOne({
+                    importId: "DEV-45912",
+                    compNm: company.name,
+                    slug: company.slug,
+                    userIds: { $in: Array.isArray(user._id) ? user._id : [user._id] }
+                });
+                if (findCompany) return null;
+
+                const logoFile = user && await db.collection("file").findOne({ userId: user._id, nm: company.logoURL, importId: "DEV-45912" });
+                const parsedAddress = parseAddress(company.address);
+
+                console.info(`Processing company: ${company.name}`);
+
+                return {
+                    importId: "DEV-45912",
+                    compNm: company.name,
+                    slug: company.slug,
+                    licenceNo: company.licenceNo || null,
+                    userIds: user?._id ? [user?._id] : [],
+                    conPer: {
+                        nm: company.nm,
+                        mobileNo: company.phone,
+                        email: company.email,
+                        countryCode: company.countryCode
+                    },
+                    logoId: logoFile?._id || null,
+                    compWebURL: company.compWebURL,
+                    compLinkedInURL: company.compLinkedInURL,
+                    profilePercent: company.profilePercent || 0,
+                    address: {
+                        street: parsedAddress.street,
+                        address1: parsedAddress.address1,
+                        countryNm: parsedAddress.countryNm,
+                        cityNm: parsedAddress.cityNm,
+                        zipCode: parsedAddress.zipCode,
+                    },
+                    isActive: !!company.isActive,
+                    benefits: company.benefits || null,
+                    compDomains: company.compDomains || null,
+                    createdBy: user?._id || null,
+                    isDefault: false,
+                    createdAt: company.createdAt,
+                    updatedAt: company.updatedAt,
+                };
+            }));
+
+            const bulkOperations = companyToInsert.filter((user): user is NonNullable<typeof user> => user !== null && user !== undefined);
+            const bulkOps = bulkOperations.map(bulkOp => {
+                return {
+                    updateOne: {
+                        filter: {
+                            importId: "DEV-45912",
+                            compNm: bulkOp.compNm,
+                            slug: bulkOp.slug,
+                        },
+                        update: { $set: bulkOp },
+                        upsert: true,
+                    }
+                }
+            });
+
+            if (bulkOps.length > 0) {
+                await db.collection("company").bulkWrite(bulkOps);
+            }
+            // await updateUserWithCompanyDetails(bulkOperations, db);
         }
-        // await updateUserWithCompanyDetails(bulkOperations, db);
-        console.info(`Successfully migrated ${bulkOps.length} Companies to MongoDB ✅`);
+        console.info(`Successfully migrated ${companiesRecords.length} Companies to MongoDB ✅`);
         return true;
     } catch (error) {
         console.error("Error - convertCompanyTable", error);
@@ -823,6 +844,7 @@ export const convertJobTable = async (mysqlPool: any, mongoClient: any) => {
 
         const chunkSize = Number(process.env.CHUNK);
         const jobChunks = _.chunk(jobsRecords, chunkSize);
+
         for (const chunk of jobChunks) {
             const jobsToInsert = await Promise.all(chunk.map(async (job: any) => {
                 if (!job?.userEmail) return null;
@@ -847,18 +869,20 @@ export const convertJobTable = async (mysqlPool: any, mongoClient: any) => {
                     desc: job.description,
                     additionalBenefits: job.additionalBenefits,
                     isActive: !!(job.isActive === "ACTIVE"),
-                    isDraft: !job.approved,
+                    isDraft: !!(job.isActive !== "ACTIVE"),
                     activatedAt: job.activatedAt,
-                    expiredAt: job.expiredAt,
+                    expiredAt: job?.expiredAt ? new Date(job.expiredAt) : null,
                     createdBy: user?._id,
                     updatedBy: user?._id ? [user?._id] : [],
                     ...(contractCache && {
                         typeOfEmpId: contractCache._id,
                         typeOfEmpNm: contractCache.names,
                     }),
-                    compId: company?._id,
-                    compNm: company?.compNm,
-                    categoryIds: [
+                    ...(company && {
+                        compId: company?._id,
+                        compNm: company?.compNm,
+                    }),
+                    categoryIds: category ? [
                         {
                             id: category._id,
                             Nm: {
@@ -866,13 +890,15 @@ export const convertJobTable = async (mysqlPool: any, mongoClient: any) => {
                                 "id": category.nm
                             },
                         },
-                    ],
-                    loc: {
-                        cityId: city._id,
-                        cityNm: city.name,
-                        countryNm: city.countryNm,
-                        countryId: city.countryId
-                    },
+                    ] : [],
+                    ...(city && {
+                        loc: {
+                            cityId: city._id,
+                            cityNm: city.name,
+                            countryNm: city.countryNm,
+                            countryId: city.countryId
+                        },
+                    }),
                     redirectUrl: job.redirectUrl,
                     useRedirectUrl: false,
                     createdAt: job.createdAt,
@@ -882,6 +908,12 @@ export const convertJobTable = async (mysqlPool: any, mongoClient: any) => {
                     appliedCount: 0,
                     hiredCount: 0,
                     unSubscribedCount: 0,
+                    jobDomains:[],
+                    ind:[],
+                    skillIds:[],
+                    keyWords:[],
+                    jobhighlights:[],
+                    question:[],
                 };
             }));
 
@@ -945,54 +977,59 @@ export const convertUserJobsTable = async (mysqlPool: any, mongoClient: any) => 
             return acc;
         }, {});
 
-        const userJobsToInsert = await Promise.all(appliesRecords.map(async (apply: any) => {
-            if (!apply?.userEmail) return null;
-            if (process.env.MAKE_IT_YOPMAIL === 'true') apply.userEmail = makeItYopmail(apply.userEmail);
+        const chunkSize = Number(process.env.CHUNK);
+        const appliesChunks = _.chunk(appliesRecords, chunkSize);
 
-            const user = await db.collection("user").findOne({ email: apply.userEmail, importId: "DEV-45912" });
-            const job = await db.collection("jobs").findOne({ title: apply.jobTitle, slug: apply.jobSlug, importId: "DEV-45912" });
-            if (!user || !job) return null;
+        for (const chunk of appliesChunks) {
+            const userJobsToInsert = await Promise.all(chunk.map(async (apply: any) => {
+                if (!apply?.userEmail) return null;
+                if (process.env.MAKE_IT_YOPMAIL === 'true') apply.userEmail = makeItYopmail(apply.userEmail);
 
-            const status: any = statusDict[statusMapping[apply.status]] || null;
+                const user = await db.collection("user").findOne({ email: apply.userEmail, importId: "DEV-45912" });
+                const job = await db.collection("jobs").findOne({ title: apply.jobTitle, slug: apply.jobSlug, importId: "DEV-45912" });
+                if (!user || !job) return null;
 
-            console.info(`Processing userJobs: ${apply.userEmail}`);
+                const status: any = statusDict[statusMapping[apply.status]] || null;
 
-            return {
-                importId: "DEV-45912",
-                jobId: job?._id,
-                jobTitle: job?.title,
-                userId: user?._id,
-                resumeObj: user?.resumes ? user.resumes.filter((resume: any) => resume.oriNm === apply.resumeTitle)[0] : {},
-                questions: [],
-                statusId: status?._id || null,
-                statusNm: status?.names || null,
-                createdBy: user?._id || null,
-                updatedBy: user?._id ? [user?._id] : [],
-                createdAt: apply.created_at,
-                updatedAt: apply.updated_at,
-            };
-        }));
+                console.info(`Processing userJobs: ${apply.userEmail}`);
 
-        const bulkOperations = userJobsToInsert.filter((user): user is NonNullable<typeof user> => user !== null && user !== undefined);
-        const bulkOps = bulkOperations.map(bulkOp => {
-            return {
-                updateOne: {
-                    filter: {
-                        importId: "DEV-45912",
-                        jobId: bulkOp.jobId,
-                        userId: bulkOp.userId
-                    },
-                    update: { $set: bulkOp },
-                    upsert: true,
+                return {
+                    importId: "DEV-45912",
+                    jobId: job?._id,
+                    jobTitle: job?.title,
+                    userId: user?._id,
+                    resumeObj: user?.resumes ? user.resumes.filter((resume: any) => resume.oriNm === apply.resumeTitle)[0] : {},
+                    questions: [],
+                    statusId: status?._id || null,
+                    statusNm: status?.names || null,
+                    createdBy: user?._id || null,
+                    updatedBy: user?._id ? [user?._id] : [],
+                    createdAt: apply.created_at,
+                    updatedAt: apply.updated_at,
+                };
+            }));
+
+            const bulkOperations = userJobsToInsert.filter((user): user is NonNullable<typeof user> => user !== null && user !== undefined);
+            const bulkOps = bulkOperations.map(bulkOp => {
+                return {
+                    updateOne: {
+                        filter: {
+                            importId: "DEV-45912",
+                            jobId: bulkOp.jobId,
+                            userId: bulkOp.userId
+                        },
+                        update: { $set: bulkOp },
+                        upsert: true,
+                    }
                 }
-            }
-        });
+            });
 
-        if (bulkOps.length > 0) {
-            await db.collection("userjobs").bulkWrite(bulkOps);
+            if (bulkOps.length > 0) {
+                await db.collection("userjobs").bulkWrite(bulkOps);
+            }
+            await updateUserAndJobsDetails(bulkOperations, db);
         }
-        await updateUserAndJobsDetails(bulkOperations, db);
-        console.info(`Successfully migrated ${bulkOps.length} UserJobs to MongoDB ✅`);
+        console.info(`Successfully migrated ${appliesRecords.length} UserJobs to MongoDB ✅`);
         return true;
     } catch (error) {
         console.error("Error - convertUserJobsTable", error);
@@ -1018,49 +1055,55 @@ export const convertJobsTrackTable = async (mysqlPool: any, mongoClient: any) =>
                 jobs j ON pb.job_id = j.id
             `);
 
-        const bookmarkToInsert = await Promise.all(bookmarksRecords.map(async (bookMark: any) => {
-            if (!bookMark?.userEmail) return null;
-            if (process.env.MAKE_IT_YOPMAIL === 'true') {
-                bookMark.userEmail = makeItYopmail(bookMark.userEmail)
-            }
-            const user = await db.collection("user").findOne({ email: bookMark.userEmail, importId: "DEV-45912" });
-            const job = await db.collection("jobs").findOne({ title: bookMark.jobTitle, slug: bookMark.jobSlug, importId: "DEV-45912" });
-            if (!user || !job) return null;
+        const chunkSize = Number(process.env.CHUNK);
+        const bookMarkChunks = _.chunk(bookmarksRecords, chunkSize);
 
-            console.info(`Processing jobsTrack: ${bookMark.userEmail}`);
+        for (const chunk of bookMarkChunks) {
 
-            return {
-                importId: "DEV-45912",
-                type: 2,
-                jobId: job?._id,
-                jobTitle: job?.title,
-                userId: user?._id,
-                createdBy: user?._id,
-                updatedBy: [user?._id],
-                createdAt: new Date(),
-                updatedAt: new Date(),
-            };
-        }));
-
-        const bulkOperations = bookmarkToInsert.filter((user): user is NonNullable<typeof user> => user !== null && user !== undefined);
-        const bulkOps = bulkOperations.map(bulkOp => {
-            return {
-                updateOne: {
-                    filter: {
-                        importId: "DEV-45912",
-                        jobId: bulkOp.jobId,
-                        userId: bulkOp.userId
-                    },
-                    update: { $set: bulkOp },
-                    upsert: true,
+            const bookmarkToInsert = await Promise.all(chunk.map(async (bookMark: any) => {
+                if (!bookMark?.userEmail) return null;
+                if (process.env.MAKE_IT_YOPMAIL === 'true') {
+                    bookMark.userEmail = makeItYopmail(bookMark.userEmail)
                 }
-            }
-        });
+                const user = await db.collection("user").findOne({ email: bookMark.userEmail, importId: "DEV-45912" });
+                const job = await db.collection("jobs").findOne({ title: bookMark.jobTitle, slug: bookMark.jobSlug, importId: "DEV-45912" });
+                if (!user || !job) return null;
 
-        if (bulkOps.length > 0) {
-            await db.collection("jobsTracks").bulkWrite(bulkOps);
+                console.info(`Processing jobsTrack: ${bookMark.userEmail}`);
+
+                return {
+                    importId: "DEV-45912",
+                    type: 2,
+                    jobId: job?._id,
+                    jobTitle: job?.title,
+                    userId: user?._id,
+                    createdBy: user?._id,
+                    updatedBy: [user?._id],
+                    createdAt: new Date(),
+                    updatedAt: new Date(),
+                };
+            }));
+
+            const bulkOperations = bookmarkToInsert.filter((user): user is NonNullable<typeof user> => user !== null && user !== undefined);
+            const bulkOps = bulkOperations.map(bulkOp => {
+                return {
+                    updateOne: {
+                        filter: {
+                            importId: "DEV-45912",
+                            jobId: bulkOp.jobId,
+                            userId: bulkOp.userId
+                        },
+                        update: { $set: bulkOp },
+                        upsert: true,
+                    }
+                }
+            });
+
+            if (bulkOps.length > 0) {
+                await db.collection("jobsTracks").bulkWrite(bulkOps);
+            }
         }
-        console.info(`Successfully migrated ${bulkOps.length} JobsTrack to MongoDB ✅`);
+        console.info(`Successfully migrated ${bookmarksRecords.length} JobsTrack to MongoDB ✅`);
         return true;
     } catch (error) {
         console.error("Error - convertJobsTrackTable", error);
@@ -1082,51 +1125,56 @@ export const convertCertificateTable = async (mysqlPool: any, mongoClient: any) 
                 people p ON c.person_id = p.id
             `)
 
-        const certificateToInsert = await Promise.all(certificatesRecords.map(async (certi: any) => {
-            if (!certi?.userEmail) return null;
-            if (process.env.MAKE_IT_YOPMAIL === 'true') {
-                certi.userEmail = makeItYopmail(certi.userEmail)
-            }
-            const user = await db.collection("user").findOne({ email: certi.userEmail, importId: "DEV-45912" });
-            if (!user) return null;
+        const chunkSize = Number(process.env.CHUNK);
+        const certiChunks = _.chunk(certificatesRecords, chunkSize);
 
-            console.info(`Processing certificate: ${certi.name}`);
-
-            return {
-                importId: "DEV-45912",
-                title: certi?.name,
-                userId: user?._id,
-                issueOrg: certi?.authority,
-                isApproved: false,
-                date: certi?.period_start,
-                issueAt: certi?.period_start,
-                expiredAt: certi?.period_end,
-                createdBy: user?._id,
-                updatedBy: user?._id ? [user?._id] : [],
-                createdAt: certi?.created_at,
-                updatedAt: certi?.updated_at,
-            };
-        }));
-
-        const bulkOperations = certificateToInsert.filter((user): user is NonNullable<typeof user> => user !== null && user !== undefined);
-        const bulkOps = bulkOperations.map(bulkOp => {
-            return {
-                updateOne: {
-                    filter: {
-                        importId: "DEV-45912",
-                        userId: bulkOp.userId,
-                        title: bulkOp.title,
-                    },
-                    update: { $set: bulkOp },
-                    upsert: true,
+        for (const chunk of certiChunks) {
+            const certificateToInsert = await Promise.all(chunk.map(async (certi: any) => {
+                if (!certi?.userEmail) return null;
+                if (process.env.MAKE_IT_YOPMAIL === 'true') {
+                    certi.userEmail = makeItYopmail(certi.userEmail)
                 }
-            }
-        });
+                const user = await db.collection("user").findOne({ email: certi.userEmail, importId: "DEV-45912" });
+                if (!user) return null;
 
-        if (bulkOps.length > 0) {
-            await db.collection("certificates").bulkWrite(bulkOps);
+                console.info(`Processing certificate: ${certi.name}`);
+
+                return {
+                    importId: "DEV-45912",
+                    title: certi?.name,
+                    userId: user?._id,
+                    issueOrg: certi?.authority,
+                    isApproved: false,
+                    date: certi?.period_start,
+                    issueAt: certi?.period_start,
+                    expiredAt: certi?.period_end,
+                    createdBy: user?._id,
+                    updatedBy: user?._id ? [user?._id] : [],
+                    createdAt: certi?.created_at,
+                    updatedAt: certi?.updated_at,
+                };
+            }));
+
+            const bulkOperations = certificateToInsert.filter((user): user is NonNullable<typeof user> => user !== null && user !== undefined);
+            const bulkOps = bulkOperations.map(bulkOp => {
+                return {
+                    updateOne: {
+                        filter: {
+                            importId: "DEV-45912",
+                            userId: bulkOp.userId,
+                            title: bulkOp.title,
+                        },
+                        update: { $set: bulkOp },
+                        upsert: true,
+                    }
+                }
+            });
+
+            if (bulkOps.length > 0) {
+                await db.collection("certificates").bulkWrite(bulkOps);
+            }
         }
-        console.info(`Successfully migrated ${bulkOps.length} Certificates to MongoDB ✅`);
+        console.info(`Successfully migrated ${certificatesRecords.length} Certificates to MongoDB ✅`);
         return true;
     } catch (error) {
         console.error("Error - convertCertificateTable", error);
