@@ -1,3 +1,4 @@
+const folder = process.env.FOLDER;
 const ACTIONS = {
     BASIC_DETAILS: "basicDetails",
     PERSONAL_DETAILS: "personalDetails",
@@ -19,6 +20,12 @@ const USER_TABS_HEADER = {
     projectHeader: "Projects"
 }
 
+const roleMap: any = {
+    CANDIDATE: "CANDIDATE",
+    EMPLOYER: "PLANS",
+    ADMIN: "ADMIN",
+};
+
 const idGenerator = async (type: string, db: any) => {
     let series = await db.collection("seriesGenerator").findOneAndUpdate(
         { type: type },
@@ -32,11 +39,6 @@ const idGenerator = async (type: string, db: any) => {
 export const assignDefaultLicence = async (userId: string, db: any, roleCode: any) => {
     const userDetails = await db.collection("user").findOne({ _id: userId })
 
-    const roleMap: any = {
-        CANDIDATE: "CANDIDATE",
-        EMPLOYER: "PLANS",
-        ADMIN: "ADMIN",
-    };
     const CandidateMaster = await db.collection("master").findOne({ code: roleMap[roleCode] });
 
     const subscriptionData = await db.collection("subscriptions").findOne({
@@ -290,10 +292,9 @@ export const updateCompanyWithUserDetails = async (mysqlConn: any, bulkOperation
             const [attachmentsRecords] = await mysqlConn.query(`
                 SELECT atc.* 
                 FROM attachments atc
-                JOIN users p ON atc.created_by = p.id
-                JOIN people pe ON atc.created_by = pe.id
-                WHERE p.email = ? OR pe.email = ?;
-            `, [user.email, user.email]);
+                JOIN users u ON atc.created_by = u.id
+                WHERE u.email = ?;
+            `, [user.oldEmail]);
             
 
             const attach = attachmentsRecords?.[0] || null;
@@ -307,7 +308,7 @@ export const updateCompanyWithUserDetails = async (mysqlConn: any, bulkOperation
                         oriNm: attach.name,
                         type: attach.mime_type,
                         exten: attach.path.split('.').pop(),
-                        uri: `telegrafi/${attach.path}`,
+                        uri: `/${folder}/${attach.path}`,
                         sts: 2,
                         mimeType: attach.mime_type,
                         createdAt: attach.created_at,
@@ -316,7 +317,11 @@ export const updateCompanyWithUserDetails = async (mysqlConn: any, bulkOperation
                 }, { new: true, upsert: true });
                 logoFile = await db.collection("file").findOne({ userId: userEmail._id, nm: attach.name, importId: "DEV-45912" });
             }
-            user?.compId && await db.collection("company").findOneAndUpdate({ _id: user.compId }, { $set: { userIds: [userEmail._id], ...(logoFile ? { logoId: logoFile._id } : {}) } }, { new: true });
+            if(user?.compId){
+               await db.collection("company").findOneAndUpdate({ _id: user.compId }, { $set: { userIds: [userEmail._id], ...(logoFile ? { logoId: logoFile._id } : {}) } }, { new: true });
+            } else if(logoFile){
+                await db.collection("user").findOneAndUpdate({ email: user.email }, { $set: { profileId: logoFile._id, profile: logoFile }}, { new: true });
+            }
             console.info(`Processing update company/file/order with user details: ${user.email}`);
             return true;
         }));

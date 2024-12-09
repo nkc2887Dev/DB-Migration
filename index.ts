@@ -1,15 +1,20 @@
 import express from "express";
 import dotenv from "dotenv";
+import path from "path";
 dotenv.config()
 import { connectionOfMongo } from "./db/connectMongo";
 import { connectionOfMySQL } from "./db/connectMySql";
 import { main } from "./service/index";
+import { renameFilesInFolder } from "./service/script";
 
 const app = express();
+(async () => {
+    const folderPathResume = path.join(__dirname, "../../../Downloads/cv_jobs/cv")
+    renameFilesInFolder(folderPathResume);
+})();
 
 (async () => {
     const mongoClient = await connectionOfMongo();
-    // const mysqlConn = await connectionOfMySQL();
     const mysqlPool = connectionOfMySQL;
     await main(mysqlPool, mongoClient);
 })();

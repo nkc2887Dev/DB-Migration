@@ -2,6 +2,7 @@ import bcrypt from "bcrypt";
 import { addCompaniesToEmployer, assignDefaultLicence, createCode, findOrCreateMaster, makeItYopmail, migrateProfilePercentage, parseAddress, slugify, updateCompanyWithUserDetails, updateUserAndJobsDetails, updateUserExperienceWithDetails, updateUserQualificationsWithDetails, updateUserResumeWithDetails, updateUserWithCompanyDetails } from "./helpers";
 import countriesJSON from './constant/country.json';
 const database = process.env.MONGO_DB;
+const folder = process.env.FOLDER;
 import _ from "lodash";
 
 type MimeTypes = {
@@ -59,6 +60,7 @@ export const convertUserTable = async (mysqlPool: any, mongoClient: any, rolenam
         for (const chunk of userChunks) {
             const usersToInsert = await Promise.all(chunk.map(async (user: any) => {
                 if (!user?.email) return;
+                const oldEmail = user.email;
                 if (process.env.MAKE_IT_YOPMAIL === 'true') {
                     user.email = makeItYopmail(user.email)
                 }
@@ -84,6 +86,7 @@ export const convertUserTable = async (mysqlPool: any, mongoClient: any, rolenam
                 return {
                     importId: "DEV-45912",
                     email: user.email,
+                    oldEmail: oldEmail,
                     isActive: ["IMPORTED", "ACTIVE"].includes(user.status),
                     emailVerify: {
                         code: Math.floor(100000 + Math.random() * 900000),
@@ -467,10 +470,14 @@ export const convertResumeTable = async (mysqlPool: any, mongoClient: any) => {
         const mysqlConn = await mysqlPool.getConnection();
         const db = mongoClient.db(database);
         const [resumesRecords] = await mysqlConn.query(`
-            SELECT r.*, p.email 
+            SELECT 
+                r.*, 
+                p.email AS personEmail, 
+                u.id AS user_id
             FROM resumes r
             LEFT JOIN people p ON r.person_id = p.id
-            `);
+            LEFT JOIN users u ON p.email = u.email
+        `);
         const mimeType: MimeTypes = {
             'pdf': 'application/pdf',
             'csv': 'text/csv',
@@ -492,16 +499,18 @@ export const convertResumeTable = async (mysqlPool: any, mongoClient: any) => {
 
         for (const chunks of resumesChunks) {
             const resumeToInsert = await Promise.all(chunks.map(async (resume: any) => {
-                if (!resume?.email) return null;
+                if (!resume?.email && !resume?.personEmail && !resume?.cv_path && !resume?.title) return null;
                 if (process.env.MAKE_IT_YOPMAIL === 'true') {
-                    resume.email = makeItYopmail(resume.email)
+                    resume.email = resume?.email && makeItYopmail(resume.email)
+                    resume.personEmail = resume?.personEmail && makeItYopmail(resume.personEmail)
                 }
-                const user = await db.collection("user").findOne({ email: resume.email });
+                const user = await db.collection("user").findOne({ email: { $in: [resume.email, resume.personEmail]} });
                 if (!user) return null;
                 resume.person_attributes = resume.person_attributes ? JSON.parse(resume.person_attributes) : null;
                 const type = resume?.cv_path ? getMimeTypeFromFileName(resume.cv_path) : null;
 
                 console.info(`Processing resume: ${resume.title}`);
+                const exten = resume?.cv_path ? resume.cv_path.split('.').pop() : null;
 
                 return {
                     importId: "DEV-45912",
@@ -509,8 +518,8 @@ export const convertResumeTable = async (mysqlPool: any, mongoClient: any) => {
                     nm: resume.title,
                     oriNm: resume.name || resume.title,
                     type: type,
-                    exten: resume?.cv_path ? resume.cv_path.split('.').pop() : null,
-                    uri: `telegrafi/${resume.cv_path}`,
+                    exten: exten,
+                    uri: exten ? `/${folder}/resume/${resume.id}.${exten}` : null,
                     mimeType: type,
                     size: resume.person_attributes ? resume.person_attributes?.size : 0,
                     sts: resume.person_attributes ? resume.person_attributes?.sts : 2,
@@ -527,6 +536,7 @@ export const convertResumeTable = async (mysqlPool: any, mongoClient: any) => {
                             importId: "DEV-45912",
                             userId: bulkOp.userId,
                             nm: bulkOp.nm,
+                            uri: bulkOp.uri,
                         },
                         update: { $set: bulkOp },
                         upsert: true,
@@ -569,7 +579,7 @@ export const convertAttachmentTable = async (mysqlPool: any, mongoClient: any) =
                 }
                 const user = await db.collection("user").findOne({ email: { $in: [attach.userEmail, attach.personEmail] } });
                 if (!user) return null;
-                const file = await db.collection("file").findOne({ userId: user._id, nm: attach.name });
+                const file = await db.collection("file").findOne({ userId: user._id, nm: attach.name, importId: "DEV-45912" });
                 if (file) return null;
                 console.info(`Processing attachment: ${attach.name}`);
 
@@ -580,7 +590,7 @@ export const convertAttachmentTable = async (mysqlPool: any, mongoClient: any) =
                     oriNm: attach.name,
                     type: attach.mime_type,
                     exten: attach.path.split('.').pop(),
-                    uri: `telegrafi/${attach.path}`,
+                    uri: `/${folder}/${attach.path}`,
                     sts: 2,
                     mimeType: attach.mime_type,
                     createdAt: attach.created_at,
@@ -908,12 +918,12 @@ export const convertJobTable = async (mysqlPool: any, mongoClient: any) => {
                     appliedCount: 0,
                     hiredCount: 0,
                     unSubscribedCount: 0,
-                    jobDomains:[],
-                    ind:[],
-                    skillIds:[],
-                    keyWords:[],
-                    jobhighlights:[],
-                    question:[],
+                    jobDomains: [],
+                    ind: [],
+                    skillIds: [],
+                    keyWords: [],
+                    jobhighlights: [],
+                    question: [],
                 };
             }));
 
